@@ -1,0 +1,438 @@
+import { Button, HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+
+export struct OccupiedCellVisual {
+    x: int,
+    y: int,
+    color: color,
+}
+
+export struct BuildingListItem {
+    id: int,
+    name: string,
+    x: int,
+    y: int,
+    color: color,
+}
+
+export struct AnchorLabel {
+    id: int,
+    x: int,
+    y: int,
+    color: color,
+}
+
+component BuildingButton inherits Rectangle {
+    in property <string> title;
+    in property <string> building-id;
+    in property <image> icon;
+    in property <string> selected-id;
+    in property <color> map-color;
+    callback selected(string);
+
+    min-height: 72px;
+    border-width: 2px;
+    border-radius: 8px;
+    border-color: selected-id == building-id ? #3465d9 : #8a8a8a;
+    background: selected-id == building-id ? #e9f0ff : #f7f7f7;
+
+    HorizontalBox {
+        padding: 8px;
+        spacing: 8px;
+
+        Image {
+            width: 52px;
+            height: 52px;
+            source: root.icon;
+            image-fit: contain;
+        }
+
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            border-width: 1px;
+            border-color: #666666;
+            border-radius: 3px;
+            background: root.map-color;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.selected(root.building-id);
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 1068px;
+    min-height: 700px;
+    title: "SHC Eco Simulator - Map Editor";
+
+    in property <int> map-size: 100;
+    in-out property <float> zoom: 1.0;
+    in-out property <string> selected-building: "";
+    in-out property <string> status-text: "Ready";
+    in property <[OccupiedCellVisual]> occupied-cells;
+    in property <[OccupiedCellVisual]> preview-cells;
+    in property <[BuildingListItem]> placed-buildings;
+    in property <[AnchorLabel]> anchor-labels;
+
+    callback place-at(float, float);
+    callback hover-at(float, float);
+    callback select-building(string);
+    callback clear-selection();
+    callback adjust-zoom(float);
+
+    private property <length> cell-px: 10px * root.zoom;
+    private property <length> map-px: root.map-size * root.cell-px;
+    private property <int> grid-count: root.map-size + 1;
+
+    private property <length> outer-padding: 12px;
+    private property <length> panel-gap: 12px;
+    private property <length> assets-panel-width: 280px;
+    private property <length> placed-panel-width: 320px;
+    private property <length> map-panel-width:
+        root.width - root.assets-panel-width - root.placed-panel-width
+        - (root.outer-padding * 2) - (root.panel-gap * 2);
+
+    assets-panel := Rectangle {
+        x: root.outer-padding;
+        y: root.outer-padding;
+        width: root.assets-panel-width;
+        height: root.height - (root.outer-padding * 2);
+        border-width: 1px;
+        border-color: #c5c5c5;
+        border-radius: 8px;
+        background: #ffffff;
+
+        VerticalBox {
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                text: "Assets";
+                font-size: 22px;
+                font-weight: 700;
+            }
+
+            ScrollView {
+                width: 100%;
+                vertical-stretch: 1;
+
+                VerticalBox {
+                    width: 100%;
+                    spacing: 8px;
+
+                    BuildingButton {
+                        title: "Goods Yard";
+                        building-id: "goods_yard";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Goods_Yard.png");
+                        map-color: #b3784e;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Armoury";
+                        building-id: "armoury";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Armoury.png");
+                        map-color: #6786ab;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Fletchers Workshop";
+                        building-id: "fletchers_workshop";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Fletchers_Workshop.png");
+                        map-color: #529c5e;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Blacksmiths Workshop";
+                        building-id: "blacksmiths_workshop";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Blacksmiths_Workshop.png");
+                        map-color: #4a4a4a;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Poleturners Workshop";
+                        building-id: "poleturners_workshop";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Poleturners_Workshop.png");
+                        map-color: #af9156;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Armourers Workshop";
+                        building-id: "armourers_workshop";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/Armourers_Workshop.png");
+                        map-color: #976fab;
+                        selected(id) => { root.select-building(id); }
+                    }
+                }
+            }
+        }
+    }
+
+    map-panel := Rectangle {
+        x: assets-panel.x + assets-panel.width + root.panel-gap;
+        y: root.outer-padding;
+        width: root.map-panel-width;
+        height: root.height - (root.outer-padding * 2);
+        border-width: 1px;
+        border-color: #c5c5c5;
+        border-radius: 8px;
+        background: #ffffff;
+
+        VerticalBox {
+            padding: 10px;
+            spacing: 8px;
+
+            HorizontalBox {
+                spacing: 8px;
+
+                Button {
+                    text: "-";
+                    clicked => { root.adjust-zoom(-0.1); }
+                }
+
+                Button {
+                    text: "+";
+                    clicked => { root.adjust-zoom(0.1); }
+                }
+
+                Text {
+                    vertical-alignment: center;
+                    text: "Zoom: " + (root.zoom * 100) + "%";
+                }
+
+                Text {
+                    vertical-alignment: center;
+                    text: root.status-text;
+                }
+            }
+
+            Rectangle {
+                border-width: 1px;
+                border-color: #e1e1e1;
+                background: #f2f4f6;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+
+                map-scroll := ScrollView {
+                    width: 100%;
+                    height: 100%;
+                    viewport-width: root.map-px;
+                    viewport-height: root.map-px;
+                    mouse-drag-pan-enabled: false;
+
+                    Rectangle {
+                        width: root.map-px;
+                        height: root.map-px;
+                        background: #f8f8f8;
+
+                        for x in root.grid-count: Rectangle {
+                            x: x * root.cell-px;
+                            y: 0px;
+                            width: 1px;
+                            height: root.map-px;
+                            background: #d8d8d8;
+                        }
+
+                        for y in root.grid-count: Rectangle {
+                            x: 0px;
+                            y: y * root.cell-px;
+                            width: root.map-px;
+                            height: 1px;
+                            background: #d8d8d8;
+                        }
+
+                        for cell in root.occupied-cells: Rectangle {
+                            x: cell.x * root.cell-px;
+                            y: (root.map-size - cell.y - 1) * root.cell-px;
+                            width: max(1px, root.cell-px - 1px);
+                            height: max(1px, root.cell-px - 1px);
+                            background: cell.color;
+                        }
+
+                        for cell in root.preview-cells: Rectangle {
+                            x: cell.x * root.cell-px;
+                            y: (root.map-size - cell.y - 1) * root.cell-px;
+                            width: max(1px, root.cell-px - 1px);
+                            height: max(1px, root.cell-px - 1px);
+                            background: cell.color;
+                        }
+
+                        for label in root.anchor-labels: Text {
+                            x: label.x * root.cell-px + 1px;
+                            y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
+                            text: label.id;
+                            color: label.color;
+                            font-size: 10px;
+                        }
+
+                        TouchArea {
+                            property <length> start-mouse-x: 0px;
+                            property <length> start-mouse-y: 0px;
+                            property <length> start-viewport-x: 0px;
+                            property <length> start-viewport-y: 0px;
+                            property <bool> was-dragging: false;
+
+                            moved => {
+                                if self.pressed {
+                                    let dx = self.mouse-x - self.start-mouse-x;
+                                    let dy = self.mouse-y - self.start-mouse-y;
+
+                                    if abs(dx) > 3px || abs(dy) > 3px {
+                                        self.was-dragging = true;
+                                    }
+
+                                    if self.was-dragging {
+                                        map-scroll.viewport-x = min(
+                                            0px,
+                                            max(
+                                                map-scroll.visible-width - root.map-px,
+                                                self.start-viewport-x - dx,
+                                            ),
+                                        );
+                                        map-scroll.viewport-y = min(
+                                            0px,
+                                            max(
+                                                map-scroll.visible-height - root.map-px,
+                                                self.start-viewport-y - dy,
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.move {
+                                    root.hover-at(
+                                        self.mouse-x / root.cell-px,
+                                        (root.map-px - self.mouse-y) / root.cell-px,
+                                    );
+                                }
+
+                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                    root.clear-selection();
+                                }
+
+                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                    self.start-mouse-x = self.mouse-x;
+                                    self.start-mouse-y = self.mouse-y;
+                                    self.start-viewport-x = map-scroll.viewport-x;
+                                    self.start-viewport-y = map-scroll.viewport-y;
+                                    self.was-dragging = false;
+                                }
+                            }
+
+                            clicked => {
+                                if !self.was-dragging {
+                                    root.place-at(
+                                        self.mouse-x / root.cell-px,
+                                        (root.map-px - self.mouse-y) / root.cell-px,
+                                    );
+                                }
+                            }
+
+                            scroll-event(event) => {
+                                if event.delta-y > 0 {
+                                    root.adjust-zoom(0.1);
+                                    return accept;
+                                }
+
+                                if event.delta-y < 0 {
+                                    root.adjust-zoom(-0.1);
+                                    return accept;
+                                }
+
+                                reject
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    placed-panel := Rectangle {
+        x: map-panel.x + map-panel.width + root.panel-gap;
+        y: root.outer-padding;
+        width: root.placed-panel-width;
+        height: root.height - (root.outer-padding * 2);
+        border-width: 1px;
+        border-color: #c5c5c5;
+        border-radius: 8px;
+        background: #ffffff;
+
+        VerticalBox {
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                text: "Placed Buildings";
+                font-size: 22px;
+                font-weight: 700;
+            }
+
+            Text {
+                text: "Order of placement";
+                color: #666666;
+            }
+
+            ScrollView {
+                width: 100%;
+                vertical-stretch: 1;
+
+                VerticalBox {
+                    width: 100%;
+                    spacing: 6px;
+
+                    for item in root.placed-buildings: Rectangle {
+                        min-height: 56px;
+                        border-width: 1px;
+                        border-color: #d0d0d0;
+                        border-radius: 6px;
+                        background: #f9f9f9;
+
+                        HorizontalBox {
+                            padding: 8px;
+                            spacing: 8px;
+
+                            Rectangle {
+                                width: 16px;
+                                height: 16px;
+                                border-width: 1px;
+                                border-color: #666666;
+                                border-radius: 3px;
+                                background: item.color;
+                            }
+
+                            VerticalBox {
+                                spacing: 2px;
+                                Text { text: "#" + item.id + " " + item.name; }
+                                Text { text: "(" + item.x + ", " + item.y + ")"; color: #666666; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
