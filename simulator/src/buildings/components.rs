@@ -1,3 +1,5 @@
+use super::EntryPoint;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildingComponentType {
     GoodsYardStack,
@@ -10,4 +12,5 @@ pub struct BuildingComponent {
     pub x: usize,
     pub y: usize,
     pub size: usize,
+    pub entry_point: Option<EntryPoint>,
 }

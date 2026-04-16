@@ -2,7 +2,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use slint::{ComponentHandle, ModelRc, VecModel};
 
-use crate::{MainWindow, editor_state::EditorState, visuals};
+use crate::{
+    MainWindow,
+    editor_state::{EditorState, PlacementOutcome},
+    visuals,
+};
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let window = MainWindow::new()?;
@@ -12,16 +16,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let weak_window = window.as_weak();
     let state_for_select = Rc::clone(&state);
-    window.on_select_building(move |building_id| {
+    window.on_select_building(move |tool_id| {
         if let Some(window) = weak_window.upgrade() {
             let mut state = state_for_select.borrow_mut();
-            let message = if state.set_selected_from_id(building_id.as_str()) {
-                let Some(selected) = state.selected() else {
-                    return;
-                };
-                format!("Selected: {}", selected.display_name())
+            let message = if state.set_selected_from_id(tool_id.as_str()) {
+                format!("Selected: {}", state.selected_label())
             } else {
-                format!("Unknown building id: {}", building_id)
+                format!("Unknown tool id: {}", tool_id)
             };
             refresh_view(&window, &state, &message);
         }
@@ -35,16 +36,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let cell_x = x.floor() as i32;
             let cell_y = y.floor() as i32;
             let message = match state.place_selected(x, y) {
-                Ok(id) => format!(
-                    "Placed {} #{} at ({}, {})",
-                    state
-                        .selected()
-                        .map(|value| value.display_name())
-                        .unwrap_or("Unknown"),
-                    id,
-                    cell_x,
-                    cell_y
-                ),
+                Ok(PlacementOutcome::Building { id, name }) => {
+                    format!("Placed {} #{} at ({}, {})", name, id, cell_x, cell_y)
+                }
+                Ok(PlacementOutcome::WallStart { x, y }) => {
+                    format!("Wall start set at ({}, {})", x, y)
+                }
+                Ok(PlacementOutcome::WallPlaced { id, start, end }) => {
+                    format!(
+                        "Placed Wall #{} from ({}, {}) to ({}, {})",
+                        id, start.0, start.1, end.0, end.1
+                    )
+                }
                 Err(error) => format!("Placement failed: {}", error),
             };
             refresh_view(&window, &state, &message);
@@ -87,12 +90,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     let map_size = state.map_size() as i32;
     window.set_map_size(map_size);
-    window.set_selected_building(
-        state
-            .selected()
-            .map(|value| value.id().into())
-            .unwrap_or_default(),
-    );
+    window.set_selected_building(state.selected_id().unwrap_or_default().into());
     window.set_status_text(status.into());
 
     let cells = visuals::build_occupied_cells(state.simulator());

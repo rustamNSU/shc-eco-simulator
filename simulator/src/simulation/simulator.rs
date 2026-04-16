@@ -1,6 +1,7 @@
 use crate::{
     buildings::{BuildingFactory, BuildingPlacement, BuildingType},
     map::{CellMap, MapError},
+    walls::{WallSegment, line_cells},
 };
 
 use super::GameTime;
@@ -11,12 +12,15 @@ pub struct Simulator {
     factory: BuildingFactory,
     time: GameTime,
     buildings: Vec<BuildingPlacement>,
+    walls: Vec<WallSegment>,
+    next_wall_id: u32,
 }
 
 #[derive(Debug)]
 pub enum SimulatorError {
     Map(MapError),
     InvalidMapSize,
+    InvalidWallDirection,
 }
 
 impl core::fmt::Display for SimulatorError {
@@ -24,6 +28,7 @@ impl core::fmt::Display for SimulatorError {
         match self {
             Self::Map(error) => write!(f, "{error}"),
             Self::InvalidMapSize => write!(f, "map size must be greater than zero"),
+            Self::InvalidWallDirection => write!(f, "wall must be horizontal or vertical"),
         }
     }
 }
@@ -47,6 +52,8 @@ impl Simulator {
             factory: BuildingFactory::new(),
             time: GameTime::new(),
             buildings: Vec::new(),
+            walls: Vec::new(),
+            next_wall_id: 1,
         })
     }
 
@@ -60,6 +67,10 @@ impl Simulator {
 
     pub fn buildings(&self) -> &[BuildingPlacement] {
         &self.buildings
+    }
+
+    pub fn walls(&self) -> &[WallSegment] {
+        &self.walls
     }
 
     pub fn is_cell_occupied(&self, x: usize, y: usize) -> bool {
@@ -79,6 +90,26 @@ impl Simulator {
         Ok(id)
     }
 
+    pub fn place_wall(
+        &mut self,
+        start_x: usize,
+        start_y: usize,
+        end_x: usize,
+        end_y: usize,
+    ) -> Result<u32, SimulatorError> {
+        let wall = WallSegment::new(self.next_wall_id, start_x, start_y, end_x, end_y);
+        if !wall.is_axis_aligned() {
+            return Err(SimulatorError::InvalidWallDirection);
+        }
+
+        let cells = line_cells(start_x, start_y, end_x, end_y);
+        self.map.place_cells(wall.id, cells.iter().copied())?;
+        self.walls.push(wall);
+        self.next_wall_id += 1;
+
+        Ok(wall.id)
+    }
+
     pub fn tick(&mut self, delta_ticks: u64) {
         self.time.advance(delta_ticks);
     }
@@ -88,7 +119,7 @@ impl Simulator {
 mod tests {
     use crate::buildings::{BuildingComponentType, BuildingType};
 
-    use super::Simulator;
+    use super::{Simulator, SimulatorError};
 
     #[test]
     fn places_workshop_when_space_is_free() {
@@ -96,6 +127,7 @@ mod tests {
         let result = simulator.place_building(BuildingType::FletchersWorkshop, 2, 3);
         assert!(result.is_ok());
         assert_eq!(simulator.buildings().len(), 1);
+        assert_eq!(simulator.buildings()[0].entry_point, None);
     }
 
     #[test]
@@ -157,5 +189,31 @@ mod tests {
         assert!(positions.contains(&(13, 10)));
         assert!(positions.contains(&(10, 13)));
         assert!(positions.contains(&(13, 13)));
+        assert_eq!(goods_yard.entry_point, None);
+        assert!(
+            goods_yard
+                .components()
+                .iter()
+                .all(|component| component.entry_point.is_none())
+        );
+    }
+
+    #[test]
+    fn places_horizontal_wall() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        let wall_id = simulator
+            .place_wall(2, 4, 6, 4)
+            .expect("wall placement should succeed");
+        assert_eq!(wall_id, 1);
+        assert_eq!(simulator.walls().len(), 1);
+        assert!(simulator.is_cell_occupied(2, 4));
+        assert!(simulator.is_cell_occupied(6, 4));
+    }
+
+    #[test]
+    fn rejects_diagonal_wall() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        let result = simulator.place_wall(1, 1, 3, 2);
+        assert!(matches!(result, Err(SimulatorError::InvalidWallDirection)));
     }
 }

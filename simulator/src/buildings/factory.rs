@@ -17,6 +17,7 @@ impl BuildingFactory {
             building_type,
             x,
             y,
+            entry_point: None,
             footprint: Footprint::for_type(building_type),
             components,
         };
@@ -38,6 +39,7 @@ impl BuildingFactory {
                     x,
                     y,
                     size: 2,
+                    entry_point: None,
                 },
                 BuildingComponent {
                     id: 2,
@@ -45,6 +47,7 @@ impl BuildingFactory {
                     x: x + 3,
                     y,
                     size: 2,
+                    entry_point: None,
                 },
                 BuildingComponent {
                     id: 3,
@@ -52,6 +55,7 @@ impl BuildingFactory {
                     x,
                     y: y + 3,
                     size: 2,
+                    entry_point: None,
                 },
                 BuildingComponent {
                     id: 4,
@@ -59,6 +63,7 @@ impl BuildingFactory {
                     x: x + 3,
                     y: y + 3,
                     size: 2,
+                    entry_point: None,
                 },
             ],
             _ => Vec::new(),

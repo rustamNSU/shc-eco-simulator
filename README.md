@@ -53,6 +53,8 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 - Footprint is square/templated per building type
 - A placement occupies specific map cells
 - Placement is rejected if any required cell is out of bounds or already occupied
+- Buildings now carry an optional `entry_point` field (`None` when no access is available)
+- `GoodsYard` itself has no single entry point; instead each of its four 2x2 stock components has its own optional entry point
 
 ### Initial Building Types
 
@@ -66,6 +68,15 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 Workshops and armoury currently use a 4x4 square footprint.
 
 `GoodsYard` uses a 5x5 pattern with four 2x2 corner stocks and a free center row/column cross.
+
+### Wall Object
+
+- `Wall` is modeled as its own object, not as a building type.
+- Wall placement uses two clicks:
+  - first click sets start cell
+  - second click sets end cell
+- End cell must be horizontal or vertical from start (no diagonal walls).
+- Wall occupies a 1-cell-thick line along all cells between start and end.
 
 ## Architecture
 

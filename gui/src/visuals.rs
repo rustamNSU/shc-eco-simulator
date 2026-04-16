@@ -27,6 +27,17 @@ pub fn build_occupied_cells(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
         }
     }
 
+    let wall_color = slint::Color::from_rgb_u8(120, 84, 62);
+    for wall in simulator.walls() {
+        for (x, y) in wall.cells() {
+            cells.push(OccupiedCellVisual {
+                x: x as i32,
+                y: y as i32,
+                color: wall_color,
+            });
+        }
+    }
+
     cells
 }
 

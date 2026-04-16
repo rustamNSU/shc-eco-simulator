@@ -69,6 +69,63 @@ component BuildingButton inherits Rectangle {
     }
 }
 
+component ToolButton inherits Rectangle {
+    in property <string> title;
+    in property <string> tool-id;
+    in property <string> selected-id;
+    in property <color> map-color;
+    callback selected(string);
+
+    min-height: 56px;
+    border-width: 2px;
+    border-radius: 8px;
+    border-color: selected-id == tool-id ? #3465d9 : #8a8a8a;
+    background: selected-id == tool-id ? #e9f0ff : #f7f7f7;
+
+    HorizontalBox {
+        padding: 8px;
+        spacing: 8px;
+
+        Rectangle {
+            width: 52px;
+            height: 28px;
+            border-width: 1px;
+            border-color: #666666;
+            border-radius: 4px;
+            background: #ffffff;
+
+            Rectangle {
+                x: 6px;
+                y: 13px;
+                width: 40px;
+                height: 2px;
+                background: root.map-color;
+            }
+        }
+
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            border-width: 1px;
+            border-color: #666666;
+            border-radius: 3px;
+            background: root.map-color;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.selected(root.tool-id);
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     preferred-width: 1280px;
     preferred-height: 820px;
@@ -184,6 +241,14 @@ export component MainWindow inherits Window {
                         map-color: #976fab;
                         selected(id) => { root.select-building(id); }
                     }
+
+                    ToolButton {
+                        title: "Wall";
+                        tool-id: "wall";
+                        selected-id: root.selected-building;
+                        map-color: #78543e;
+                        selected(id) => { root.select-building(id); }
+                    }
                 }
             }
         }
@@ -286,85 +351,90 @@ export component MainWindow inherits Window {
                             font-size: 10px;
                         }
 
-                        TouchArea {
-                            property <length> start-mouse-x: 0px;
-                            property <length> start-mouse-y: 0px;
-                            property <length> start-viewport-x: 0px;
-                            property <length> start-viewport-y: 0px;
-                            property <bool> was-dragging: false;
+                    }
+                }
 
-                            moved => {
-                                if self.pressed {
-                                    let dx = self.mouse-x - self.start-mouse-x;
-                                    let dy = self.mouse-y - self.start-mouse-y;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
 
-                                    if abs(dx) > 3px || abs(dy) > 3px {
-                                        self.was-dragging = true;
-                                    }
+                    property <length> start-mouse-x: 0px;
+                    property <length> start-mouse-y: 0px;
+                    property <length> start-viewport-x: 0px;
+                    property <length> start-viewport-y: 0px;
+                    property <bool> was-dragging: false;
+                    property <bool> pan-active: false;
 
-                                    if self.was-dragging {
-                                        map-scroll.viewport-x = min(
-                                            0px,
-                                            max(
-                                                map-scroll.visible-width - root.map-px,
-                                                self.start-viewport-x - dx,
-                                            ),
-                                        );
-                                        map-scroll.viewport-y = min(
-                                            0px,
-                                            max(
-                                                map-scroll.visible-height - root.map-px,
-                                                self.start-viewport-y - dy,
-                                            ),
-                                        );
-                                    }
-                                }
+                    moved => {
+                        if self.pan-active {
+                            let dx = self.mouse-x - self.start-mouse-x;
+                            let dy = self.mouse-y - self.start-mouse-y;
+
+                            if abs(dx) > 3px || abs(dy) > 3px {
+                                self.was-dragging = true;
                             }
 
-                            pointer-event(event) => {
-                                if event.kind == PointerEventKind.move {
-                                    root.hover-at(
-                                        self.mouse-x / root.cell-px,
-                                        (root.map-px - self.mouse-y) / root.cell-px,
-                                    );
-                                }
-
-                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                                    root.clear-selection();
-                                }
-
-                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                                    self.start-mouse-x = self.mouse-x;
-                                    self.start-mouse-y = self.mouse-y;
-                                    self.start-viewport-x = map-scroll.viewport-x;
-                                    self.start-viewport-y = map-scroll.viewport-y;
-                                    self.was-dragging = false;
-                                }
-                            }
-
-                            clicked => {
-                                if !self.was-dragging {
-                                    root.place-at(
-                                        self.mouse-x / root.cell-px,
-                                        (root.map-px - self.mouse-y) / root.cell-px,
-                                    );
-                                }
-                            }
-
-                            scroll-event(event) => {
-                                if event.delta-y > 0 {
-                                    root.adjust-zoom(0.1);
-                                    return accept;
-                                }
-
-                                if event.delta-y < 0 {
-                                    root.adjust-zoom(-0.1);
-                                    return accept;
-                                }
-
-                                reject
-                            }
+                            map-scroll.viewport-x = min(
+                                0px,
+                                max(
+                                    map-scroll.visible-width - root.map-px,
+                                    self.start-viewport-x + dx,
+                                ),
+                            );
+                            map-scroll.viewport-y = min(
+                                0px,
+                                max(
+                                    map-scroll.visible-height - root.map-px,
+                                    self.start-viewport-y + dy,
+                                ),
+                            );
                         }
+                    }
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.move && !self.pan-active {
+                            root.hover-at(
+                                (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
+                                (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
+                            );
+                        }
+
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                            self.start-mouse-x = self.mouse-x;
+                            self.start-mouse-y = self.mouse-y;
+                            self.start-viewport-x = map-scroll.viewport-x;
+                            self.start-viewport-y = map-scroll.viewport-y;
+                            self.was-dragging = false;
+                            self.pan-active = true;
+                        }
+
+                        if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                            if !self.was-dragging {
+                                root.place-at(
+                                    (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
+                                    (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
+                                );
+                            }
+                            self.pan-active = false;
+                        }
+
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.clear-selection();
+                        }
+                    }
+
+                    scroll-event(event) => {
+                        if event.delta-y > 0 {
+                            root.adjust-zoom(0.1);
+                            return accept;
+                        }
+
+                        if event.delta-y < 0 {
+                            root.adjust-zoom(-0.1);
+                            return accept;
+                        }
+
+                        reject
                     }
                 }
             }

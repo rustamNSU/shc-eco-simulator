@@ -1,9 +1,31 @@
-use simulator::{BuildingType, DEFAULT_MAP_SIZE, Footprint, Simulator};
+use simulator::{BuildingType, DEFAULT_MAP_SIZE, Footprint, Simulator, walls::line_cells};
+
+enum SelectedTool {
+    Building(BuildingType),
+    Wall,
+}
+
+pub enum PlacementOutcome {
+    Building {
+        id: u32,
+        name: &'static str,
+    },
+    WallStart {
+        x: i32,
+        y: i32,
+    },
+    WallPlaced {
+        id: u32,
+        start: (i32, i32),
+        end: (i32, i32),
+    },
+}
 
 pub struct EditorState {
     simulator: Simulator,
-    selected: Option<BuildingType>,
+    selected: Option<SelectedTool>,
     hover_cell: Option<(i32, i32)>,
+    wall_start: Option<(i32, i32)>,
 }
 
 impl EditorState {
@@ -12,6 +34,7 @@ impl EditorState {
             simulator: Simulator::new(DEFAULT_MAP_SIZE)?,
             selected: None,
             hover_cell: None,
+            wall_start: None,
         })
     }
 
@@ -19,20 +42,41 @@ impl EditorState {
         self.simulator.map_size()
     }
 
-    pub fn selected(&self) -> Option<BuildingType> {
-        self.selected
+    pub fn selected_id(&self) -> Option<&'static str> {
+        match self.selected {
+            Some(SelectedTool::Building(building_type)) => Some(building_type.id()),
+            Some(SelectedTool::Wall) => Some("wall"),
+            None => None,
+        }
     }
 
     pub fn set_selected_from_id(&mut self, value: &str) -> bool {
-        if let Some(building) = BuildingType::from_id(value) {
-            self.selected = Some(building);
+        self.wall_start = None;
+
+        if value == "wall" {
+            self.selected = Some(SelectedTool::Wall);
             return true;
         }
+
+        if let Some(building) = BuildingType::from_id(value) {
+            self.selected = Some(SelectedTool::Building(building));
+            return true;
+        }
+
         false
+    }
+
+    pub fn selected_label(&self) -> &'static str {
+        match self.selected {
+            Some(SelectedTool::Building(building_type)) => building_type.display_name(),
+            Some(SelectedTool::Wall) => "Wall",
+            None => "None",
+        }
     }
 
     pub fn clear_selection(&mut self) {
         self.selected = None;
+        self.wall_start = None;
     }
 
     pub fn set_hover_cell(&mut self, x: f32, y: f32) {
@@ -47,7 +91,7 @@ impl EditorState {
         self.hover_cell = Some((x, y));
     }
 
-    pub fn place_selected(&mut self, x: f32, y: f32) -> Result<u32, String> {
+    pub fn place_selected(&mut self, x: f32, y: f32) -> Result<PlacementOutcome, String> {
         let x = x.floor() as i32;
         let y = y.floor() as i32;
 
@@ -57,14 +101,51 @@ impl EditorState {
 
         let ux = x as usize;
         let uy = y as usize;
+        if ux >= self.map_size() || uy >= self.map_size() {
+            return Err("cell is outside map".to_string());
+        }
 
-        let Some(selected) = self.selected else {
-            return Err("no building selected".to_string());
-        };
+        match self.selected {
+            Some(SelectedTool::Building(building_type)) => {
+                let id = self
+                    .simulator
+                    .place_building(building_type, ux, uy)
+                    .map_err(|error| error.to_string())?;
+                Ok(PlacementOutcome::Building {
+                    id,
+                    name: building_type.display_name(),
+                })
+            }
+            Some(SelectedTool::Wall) => self.place_wall_click(x, y),
+            None => Err("no tool selected".to_string()),
+        }
+    }
 
-        self.simulator
-            .place_building(selected, ux, uy)
-            .map_err(|error| error.to_string())
+    fn place_wall_click(&mut self, x: i32, y: i32) -> Result<PlacementOutcome, String> {
+        match self.wall_start {
+            None => {
+                self.wall_start = Some((x, y));
+                Ok(PlacementOutcome::WallStart { x, y })
+            }
+            Some((sx, sy)) => {
+                if sx != x && sy != y {
+                    return Err(
+                        "wall end cell must be horizontal or vertical from start".to_string()
+                    );
+                }
+
+                let wall_id = self
+                    .simulator
+                    .place_wall(sx as usize, sy as usize, x as usize, y as usize)
+                    .map_err(|error| error.to_string())?;
+                self.wall_start = None;
+                Ok(PlacementOutcome::WallPlaced {
+                    id: wall_id,
+                    start: (sx, sy),
+                    end: (x, y),
+                })
+            }
+        }
     }
 
     pub fn simulator(&self) -> &Simulator {
@@ -75,22 +156,41 @@ impl EditorState {
         let Some((anchor_x, anchor_y)) = self.hover_cell else {
             return Vec::new();
         };
-        let Some(selected) = self.selected else {
-            return Vec::new();
-        };
 
-        let map_size = self.simulator.map_size() as i32;
-        let footprint = Footprint::for_type(selected);
-        let mut cells = Vec::new();
+        match self.selected {
+            Some(SelectedTool::Building(selected)) => {
+                let map_size = self.simulator.map_size() as i32;
+                let footprint = Footprint::for_type(selected);
+                let mut cells = Vec::new();
 
-        for (dx, dy) in footprint.occupied_offsets() {
-            let x = anchor_x + dx as i32;
-            let y = anchor_y + dy as i32;
-            if x >= 0 && y >= 0 && x < map_size && y < map_size {
-                cells.push((x, y));
+                for (dx, dy) in footprint.occupied_offsets() {
+                    let x = anchor_x + dx as i32;
+                    let y = anchor_y + dy as i32;
+                    if x >= 0 && y >= 0 && x < map_size && y < map_size {
+                        cells.push((x, y));
+                    }
+                }
+
+                cells
             }
+            Some(SelectedTool::Wall) => {
+                if let Some((sx, sy)) = self.wall_start {
+                    if sx == anchor_x || sy == anchor_y {
+                        return line_cells(
+                            sx as usize,
+                            sy as usize,
+                            anchor_x as usize,
+                            anchor_y as usize,
+                        )
+                        .into_iter()
+                        .map(|(x, y)| (x as i32, y as i32))
+                        .collect();
+                    }
+                    return Vec::new();
+                }
+                vec![(anchor_x, anchor_y)]
+            }
+            None => Vec::new(),
         }
-
-        cells
     }
 }
