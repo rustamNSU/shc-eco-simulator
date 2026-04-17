@@ -5,6 +5,7 @@ use crate::{BuildingListItem, MapMarker, OccupiedCellVisual};
 pub fn building_color(building_type: BuildingType) -> slint::Color {
     match building_type {
         BuildingType::GoodsYard => slint::Color::from_rgb_u8(179, 120, 78),
+        BuildingType::Stockpile => slint::Color::from_rgb_u8(179, 120, 78),
         BuildingType::Armoury => slint::Color::from_rgb_u8(103, 134, 171),
         BuildingType::FletchersWorkshop => slint::Color::from_rgb_u8(82, 156, 94),
         BuildingType::BlacksmithsWorkshop => slint::Color::from_rgb_u8(74, 74, 74),

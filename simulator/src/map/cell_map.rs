@@ -71,6 +71,16 @@ impl CellMap {
         Ok(())
     }
 
+    pub fn clear_cells(&mut self, cells: impl IntoIterator<Item = (usize, usize)>) {
+        for (x, y) in cells {
+            if x >= self.size || y >= self.size {
+                continue;
+            }
+            let idx = self.index(x, y);
+            self.cells[idx] = None;
+        }
+    }
+
     fn get_cell(&self, x: usize, y: usize) -> Option<u32> {
         if x >= self.size || y >= self.size {
             return None;

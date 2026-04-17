@@ -1,6 +1,13 @@
+pub const WORKSHOP_SLOWDOWN_BASE: u32 = 2;
+
+pub fn unit_speed_cells_per_tick(slowdown_base: u32) -> f64 {
+    1.0 / (8.0 * ((slowdown_base as f64) + 1.0))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildingType {
     GoodsYard,
+    Stockpile,
     Armoury,
     FletchersWorkshop,
     BlacksmithsWorkshop,
@@ -12,6 +19,7 @@ impl BuildingType {
     pub fn id(self) -> &'static str {
         match self {
             Self::GoodsYard => "goods_yard",
+            Self::Stockpile => "stockpile",
             Self::Armoury => "armoury",
             Self::FletchersWorkshop => "fletchers_workshop",
             Self::BlacksmithsWorkshop => "blacksmiths_workshop",
@@ -23,6 +31,7 @@ impl BuildingType {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::GoodsYard => "Goods Yard",
+            Self::Stockpile => "Stockpile",
             Self::Armoury => "Armoury",
             Self::FletchersWorkshop => "Fletchers Workshop",
             Self::BlacksmithsWorkshop => "Blacksmiths Workshop",
@@ -52,5 +61,56 @@ impl BuildingType {
             Self::PoleturnersWorkshop,
             Self::ArmourersWorkshop,
         ]
+    }
+
+    pub fn worker_slowdown_base(self) -> Option<u32> {
+        match self {
+            Self::FletchersWorkshop
+            | Self::BlacksmithsWorkshop
+            | Self::PoleturnersWorkshop
+            | Self::ArmourersWorkshop => Some(WORKSHOP_SLOWDOWN_BASE),
+            _ => None,
+        }
+    }
+
+    pub fn worker_speed_cells_per_tick(self) -> Option<f64> {
+        self.worker_slowdown_base().map(unit_speed_cells_per_tick)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};
+
+    #[test]
+    fn speed_formula_matches_spec() {
+        let value = unit_speed_cells_per_tick(2);
+        let expected = 1.0 / 24.0;
+        assert!((value - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn workshops_have_slowdown_base_two() {
+        for workshop in [
+            BuildingType::FletchersWorkshop,
+            BuildingType::BlacksmithsWorkshop,
+            BuildingType::PoleturnersWorkshop,
+            BuildingType::ArmourersWorkshop,
+        ] {
+            assert_eq!(
+                workshop.worker_slowdown_base(),
+                Some(WORKSHOP_SLOWDOWN_BASE)
+            );
+        }
+    }
+
+    #[test]
+    fn non_workshops_have_no_worker_speed() {
+        assert_eq!(BuildingType::GoodsYard.worker_slowdown_base(), None);
+        assert_eq!(BuildingType::Stockpile.worker_slowdown_base(), None);
+        assert_eq!(BuildingType::Armoury.worker_slowdown_base(), None);
+        assert_eq!(BuildingType::GoodsYard.worker_speed_cells_per_tick(), None);
+        assert_eq!(BuildingType::Stockpile.worker_speed_cells_per_tick(), None);
+        assert_eq!(BuildingType::Armoury.worker_speed_cells_per_tick(), None);
     }
 }

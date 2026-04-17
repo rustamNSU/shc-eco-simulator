@@ -54,7 +54,9 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 - A placement occupies specific map cells
 - Placement is rejected if any required cell is out of bounds or already occupied
 - Buildings now carry an optional `entry_point` field (`None` when no access is available)
-- `GoodsYard` itself has no single entry point; instead each of its four 2x2 stock components has its own optional entry point
+- Placing `GoodsYard` creates four independent `Stockpile` buildings (2x2 each), grouped under one goods-yard group id.
+- Each `Stockpile` has its own entry point and can be connected independently.
+- Removing any stockpile from a goods-yard group removes all four stockpiles from that group.
 - Entry point assignment is automatic on placement:
   - default: `(x + floor(n/2), y - 1)` where `x,y` is bottom-left and `n` is size
   - special case: when `n == 2`, default is `(x, y - 1)`
@@ -65,6 +67,7 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 ### Initial Building Types
 
 - `GoodsYard`
+- `Stockpile` (created automatically from Goods Yard placement)
 - `Armoury`
 - `FletchersWorkshop`
 - `BlacksmithsWorkshop`
@@ -73,7 +76,7 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 
 Workshops and armoury currently use a 4x4 square footprint.
 
-`GoodsYard` uses a 5x5 pattern with four 2x2 corner stocks and a free center row/column cross.
+`GoodsYard` placement uses a 5x5 template area with four 2x2 corner stockpiles and a free center row/column cross.
 
 ### Wall Object
 
@@ -83,6 +86,26 @@ Workshops and armoury currently use a 4x4 square footprint.
   - second click sets end cell
 - End cell must be horizontal or vertical from start (no diagonal walls).
 - Wall occupies a 1-cell-thick line along all cells between start and end.
+- UI settings include a **Remove All Walls** action.
+
+### Worker Speed
+
+- Unit movement speed function is:
+  - `speed_cells_per_tick = 1 / (8 * (SB + 1))`
+- Workshops are the only current worker buildings.
+- Workshop slowdown base coefficient is:
+  - `SB = 2`
+
+### Distance Objects
+
+- Distances are directional objects between two buildings:
+  - `(start_building_id, finish_building_id)`
+  - reverse direction is a separate object
+- Distance value is shortest cell-path length between start entry point and finish entry point.
+- Neighbor cells include diagonal neighbors (8-direction movement).
+- Occupied cells are blocked for path traversal.
+- If start and finish entry points are the same cell, distance is `0`.
+- Distance objects are stored in a map keyed by `(start_id, finish_id)`.
 
 ## Architecture
 

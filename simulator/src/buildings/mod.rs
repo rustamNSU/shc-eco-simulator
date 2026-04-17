@@ -10,4 +10,4 @@ pub use entry_point::EntryPoint;
 pub use factory::BuildingFactory;
 pub use footprint::Footprint;
 pub use placement::BuildingPlacement;
-pub use types::BuildingType;
+pub use types::{BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};

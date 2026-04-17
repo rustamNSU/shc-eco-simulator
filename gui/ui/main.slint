@@ -151,6 +151,7 @@ export component MainWindow inherits Window {
     callback select-building(string);
     callback clear-selection();
     callback adjust-zoom(float);
+    callback remove-all-walls();
 
     private property <length> cell-px: 10px * root.zoom;
     private property <length> map-px: root.map-size * root.cell-px;
@@ -178,26 +179,26 @@ export component MainWindow inherits Window {
             padding: 10px;
             spacing: 8px;
 
-            Text {
-                text: "Assets";
-                font-size: 22px;
-                font-weight: 700;
-            }
-
             Rectangle {
                 border-width: 1px;
                 border-color: #d9d9d9;
                 border-radius: 6px;
                 background: #fafafa;
-                min-height: 50px;
+                min-height: 82px;
 
-                HorizontalBox {
+                VerticalBox {
                     padding: 8px;
                     spacing: 8px;
 
                     CheckBox {
                         checked <=> root.show-entry-points;
                         text: "Plot entry points";
+                    }
+
+                    Button {
+                        text: "Remove All Walls";
+                        horizontal-stretch: 1;
+                        clicked => { root.remove-all-walls(); }
                     }
                 }
             }
@@ -275,6 +276,14 @@ export component MainWindow inherits Window {
                         tool-id: "wall";
                         selected-id: root.selected-building;
                         map-color: #78543e;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    ToolButton {
+                        title: "Remove";
+                        tool-id: "remove";
+                        selected-id: root.selected-building;
+                        map-color: #d9534f;
                         selected(id) => { root.select-building(id); }
                     }
                 }

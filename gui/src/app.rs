@@ -48,6 +48,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         id, start.0, start.1, end.0, end.1
                     )
                 }
+                Ok(PlacementOutcome::RemovedBuildings {
+                    removed_ids,
+                    goods_yard_group_id,
+                }) => {
+                    if removed_ids.is_empty() {
+                        "Nothing removed".to_string()
+                    } else if let Some(group_id) = goods_yard_group_id {
+                        format!(
+                            "Removed Goods Yard group #{} ({} stockpiles)",
+                            group_id,
+                            removed_ids.len()
+                        )
+                    } else {
+                        format!("Removed building #{}", removed_ids[0])
+                    }
+                }
+                Ok(PlacementOutcome::RemovedWall { id }) => format!("Removed Wall #{}", id),
+                Ok(PlacementOutcome::NothingToRemove) => {
+                    "Nothing to remove at this cell".to_string()
+                }
                 Err(error) => format!("Placement failed: {}", error),
             };
             refresh_view(&window, &state, &message);
@@ -80,6 +100,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let current = window.get_zoom();
             let next = (current + delta).clamp(0.2, 4.0);
             window.set_zoom(next);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_remove_walls = Rc::clone(&state);
+    window.on_remove_all_walls(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_remove_walls.borrow_mut();
+            let removed = state.remove_all_walls();
+            let message = if removed == 0 {
+                "No walls to remove".to_string()
+            } else {
+                format!("Removed {} wall segment(s)", removed)
+            };
+            refresh_view(&window, &state, &message);
         }
     });
 

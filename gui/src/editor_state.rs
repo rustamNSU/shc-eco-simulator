@@ -1,8 +1,11 @@
-use simulator::{BuildingType, DEFAULT_MAP_SIZE, Footprint, Simulator, walls::line_cells};
+use simulator::{
+    BuildingType, DEFAULT_MAP_SIZE, Footprint, RemoveOutcome, Simulator, walls::line_cells,
+};
 
 enum SelectedTool {
     Building(BuildingType),
     Wall,
+    Remove,
 }
 
 pub enum PlacementOutcome {
@@ -19,6 +22,14 @@ pub enum PlacementOutcome {
         start: (i32, i32),
         end: (i32, i32),
     },
+    RemovedBuildings {
+        removed_ids: Vec<u32>,
+        goods_yard_group_id: Option<u32>,
+    },
+    RemovedWall {
+        id: u32,
+    },
+    NothingToRemove,
 }
 
 pub struct EditorState {
@@ -46,6 +57,7 @@ impl EditorState {
         match self.selected {
             Some(SelectedTool::Building(building_type)) => Some(building_type.id()),
             Some(SelectedTool::Wall) => Some("wall"),
+            Some(SelectedTool::Remove) => Some("remove"),
             None => None,
         }
     }
@@ -58,7 +70,15 @@ impl EditorState {
             return true;
         }
 
+        if value == "remove" {
+            self.selected = Some(SelectedTool::Remove);
+            return true;
+        }
+
         if let Some(building) = BuildingType::from_id(value) {
+            if building == BuildingType::Stockpile {
+                return false;
+            }
             self.selected = Some(SelectedTool::Building(building));
             return true;
         }
@@ -70,6 +90,7 @@ impl EditorState {
         match self.selected {
             Some(SelectedTool::Building(building_type)) => building_type.display_name(),
             Some(SelectedTool::Wall) => "Wall",
+            Some(SelectedTool::Remove) => "Remove",
             None => "None",
         }
     }
@@ -117,8 +138,14 @@ impl EditorState {
                 })
             }
             Some(SelectedTool::Wall) => self.place_wall_click(x, y),
+            Some(SelectedTool::Remove) => Ok(self.remove_at(ux, uy)),
             None => Err("no tool selected".to_string()),
         }
+    }
+
+    pub fn remove_all_walls(&mut self) -> usize {
+        self.wall_start = None;
+        self.simulator.remove_all_walls()
     }
 
     fn place_wall_click(&mut self, x: i32, y: i32) -> Result<PlacementOutcome, String> {
@@ -150,6 +177,21 @@ impl EditorState {
 
     pub fn simulator(&self) -> &Simulator {
         &self.simulator
+    }
+
+    fn remove_at(&mut self, x: usize, y: usize) -> PlacementOutcome {
+        self.wall_start = None;
+        match self.simulator.remove_at(x, y) {
+            RemoveOutcome::None => PlacementOutcome::NothingToRemove,
+            RemoveOutcome::Wall { id } => PlacementOutcome::RemovedWall { id },
+            RemoveOutcome::Buildings {
+                removed_ids,
+                goods_yard_group_id,
+            } => PlacementOutcome::RemovedBuildings {
+                removed_ids,
+                goods_yard_group_id,
+            },
+        }
     }
 
     pub fn preview_cells(&self) -> Vec<(i32, i32)> {
@@ -190,6 +232,7 @@ impl EditorState {
                 }
                 vec![(anchor_x, anchor_y)]
             }
+            Some(SelectedTool::Remove) => vec![(anchor_x, anchor_y)],
             None => Vec::new(),
         }
     }

@@ -6,6 +6,7 @@ pub struct BuildingPlacement {
     pub building_type: BuildingType,
     pub x: usize,
     pub y: usize,
+    pub goods_yard_group_id: Option<u32>,
     pub entry_point: Option<EntryPoint>,
     pub footprint: Footprint,
     pub components: Vec<BuildingComponent>,

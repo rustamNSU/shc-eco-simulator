@@ -40,6 +40,7 @@ impl Footprint {
     pub fn for_type(building_type: BuildingType) -> Self {
         match building_type {
             BuildingType::GoodsYard => Self::goods_yard(),
+            BuildingType::Stockpile => Self::square(2),
             BuildingType::Armoury
             | BuildingType::FletchersWorkshop
             | BuildingType::BlacksmithsWorkshop

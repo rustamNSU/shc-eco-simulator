@@ -5,10 +5,12 @@ pub mod walls;
 
 pub use buildings::{
     BuildingComponent, BuildingComponentType, BuildingPlacement, BuildingType, EntryPoint,
-    Footprint,
+    Footprint, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick,
 };
 pub use map::{CellMap, MapError};
-pub use simulation::{GameTime, Simulator, SimulatorError};
+pub use simulation::{
+    BuildingDistance, DistanceKey, GameTime, RemoveOutcome, Simulator, SimulatorError,
+};
 pub use walls::WallSegment;
 
 pub const DEFAULT_MAP_SIZE: usize = 100;
