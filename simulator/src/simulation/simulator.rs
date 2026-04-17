@@ -108,6 +108,7 @@ impl Simulator {
         self.map.place_cells(wall.id, cells.iter().copied())?;
         self.walls.push(wall);
         self.next_wall_id += 1;
+        self.recalculate_blocked_entry_points();
 
         Ok(wall.id)
     }
@@ -117,16 +118,26 @@ impl Simulator {
     }
 
     fn assign_entry_points(&self, placement: &mut BuildingPlacement) {
+        let rotation_steps = if is_workshop(placement.building_type) {
+            self.workshop_wall_rotation_steps(placement.x, placement.y, placement.width())
+        } else {
+            0
+        };
+
         if placement.building_type != BuildingType::GoodsYard {
-            placement.entry_point =
-                self.resolve_entry_point_for_square(placement.x, placement.y, placement.width());
+            placement.entry_point = self.resolve_entry_point_for_square(
+                placement.x,
+                placement.y,
+                placement.width(),
+                rotation_steps,
+            );
         } else {
             placement.entry_point = None;
         }
 
         for component in &mut placement.components {
             component.entry_point =
-                self.resolve_entry_point_for_square(component.x, component.y, component.size);
+                self.resolve_entry_point_for_square(component.x, component.y, component.size, 0);
         }
     }
 
@@ -140,7 +151,20 @@ impl Simulator {
                         .entry_point
                         .is_some_and(|entry| self.map.is_occupied(entry.x, entry.y))
                 {
-                    self.resolve_entry_point_for_square(building.x, building.y, building.width())
+                    self.resolve_entry_point_for_square(
+                        building.x,
+                        building.y,
+                        building.width(),
+                        if is_workshop(building.building_type) {
+                            self.workshop_wall_rotation_steps(
+                                building.x,
+                                building.y,
+                                building.width(),
+                            )
+                        } else {
+                            0
+                        },
+                    )
                 } else {
                     building.entry_point
                 };
@@ -157,6 +181,7 @@ impl Simulator {
                                 component.x,
                                 component.y,
                                 component.size,
+                                0,
                             )
                         } else {
                             component.entry_point
@@ -184,14 +209,15 @@ impl Simulator {
         x: usize,
         y: usize,
         size: usize,
+        rotation_steps: usize,
     ) -> Option<EntryPoint> {
-        let default_cell = default_entry_cell(x, y, size);
+        let default_cell = default_entry_cell_rotated(x, y, size, rotation_steps);
         let side_cells = side_perimeter_cells_clockwise(x, y, size, default_cell);
         if let Some(point) = self.first_available(side_cells) {
             return Some(point);
         }
 
-        let corner_cells = corner_cells_clockwise_from_bottom_right(x, y, size);
+        let corner_cells = corner_cells_clockwise_from_bottom_right(x, y, size, rotation_steps);
         self.first_available(corner_cells)
     }
 
@@ -208,15 +234,65 @@ impl Simulator {
         }
         None
     }
+
+    fn workshop_wall_rotation_steps(&self, x: usize, y: usize, size: usize) -> usize {
+        let xi = x as i32;
+        let yi = y as i32;
+        let ni = size as i32;
+
+        if self.side_has_wall_contact((xi..(xi + ni)).map(|cx| (cx, yi + ni)).collect()) {
+            return 0;
+        }
+        if self.side_has_wall_contact((yi..(yi + ni)).map(|cy| (xi + ni, cy)).collect()) {
+            return 1;
+        }
+        if self.side_has_wall_contact((xi..(xi + ni)).map(|cx| (cx, yi - 1)).collect()) {
+            return 2;
+        }
+        if self.side_has_wall_contact((yi..(yi + ni)).map(|cy| (xi - 1, cy)).collect()) {
+            return 3;
+        }
+
+        0
+    }
+
+    fn side_has_wall_contact(&self, cells: Vec<(i32, i32)>) -> bool {
+        cells.into_iter().any(|(x, y)| self.is_wall_at(x, y))
+    }
+
+    fn is_wall_at(&self, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 {
+            return false;
+        }
+        let ux = x as usize;
+        let uy = y as usize;
+        self.walls
+            .iter()
+            .any(|wall| wall_contains_cell(wall, ux, uy))
+    }
 }
 
-fn default_entry_cell(x: usize, y: usize, size: usize) -> Option<(i32, i32)> {
+fn default_entry_cell_rotated(
+    x: usize,
+    y: usize,
+    size: usize,
+    rotation_steps: usize,
+) -> Option<(i32, i32)> {
     if y == 0 || size == 0 {
         return None;
     }
 
-    let entry_x = if size == 2 { x } else { x + (size / 2) };
-    Some((entry_x as i32, (y - 1) as i32))
+    let offset = if size == 2 { 0 } else { (size / 2) as i32 };
+    let xi = x as i32;
+    let yi = y as i32;
+    let ni = size as i32;
+
+    match rotation_steps % 4 {
+        0 => Some((xi + offset, yi - 1)),
+        1 => Some((xi - 1, yi + offset)),
+        2 => Some((xi + offset, yi + ni)),
+        _ => Some((xi + ni, yi + offset)),
+    }
 }
 
 fn side_perimeter_cells_clockwise(
@@ -259,17 +335,57 @@ fn side_perimeter_cells_clockwise(
     ring
 }
 
-fn corner_cells_clockwise_from_bottom_right(x: usize, y: usize, size: usize) -> Vec<(i32, i32)> {
+fn corner_cells_clockwise_from_bottom_right(
+    x: usize,
+    y: usize,
+    size: usize,
+    rotation_steps: usize,
+) -> Vec<(i32, i32)> {
     let xi = x as i32;
     let yi = y as i32;
     let ni = size as i32;
 
-    vec![
+    let mut corners = vec![
         (xi + ni, yi - 1),
         (xi - 1, yi - 1),
         (xi - 1, yi + ni),
         (xi + ni, yi + ni),
-    ]
+    ];
+
+    corners.rotate_left(rotation_steps % 4);
+    corners
+}
+
+fn wall_contains_cell(wall: &WallSegment, x: usize, y: usize) -> bool {
+    if wall.start_x == wall.end_x {
+        if x != wall.start_x {
+            return false;
+        }
+        let min_y = wall.start_y.min(wall.end_y);
+        let max_y = wall.start_y.max(wall.end_y);
+        return y >= min_y && y <= max_y;
+    }
+
+    if wall.start_y == wall.end_y {
+        if y != wall.start_y {
+            return false;
+        }
+        let min_x = wall.start_x.min(wall.end_x);
+        let max_x = wall.start_x.max(wall.end_x);
+        return x >= min_x && x <= max_x;
+    }
+
+    false
+}
+
+fn is_workshop(building_type: BuildingType) -> bool {
+    matches!(
+        building_type,
+        BuildingType::FletchersWorkshop
+            | BuildingType::BlacksmithsWorkshop
+            | BuildingType::PoleturnersWorkshop
+            | BuildingType::ArmourersWorkshop
+    )
 }
 
 #[cfg(test)]
@@ -450,5 +566,25 @@ mod tests {
             .entry_point
             .expect("entry point should still exist after recalculation");
         assert_eq!(updated_entry, EntryPoint { x: 7, y: 5 });
+    }
+
+    #[test]
+    fn workshop_wall_contact_right_side_rotates_default_to_left() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_wall(14, 10, 14, 13)
+            .expect("wall should be placed");
+
+        simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 10)
+            .expect("workshop should be placed");
+
+        let workshop = simulator
+            .buildings()
+            .iter()
+            .find(|b| b.x == 10 && b.y == 10)
+            .expect("workshop should exist");
+
+        assert_eq!(workshop.entry_point, Some(EntryPoint { x: 9, y: 12 }));
     }
 }

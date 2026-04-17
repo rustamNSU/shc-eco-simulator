@@ -14,11 +14,12 @@ export struct BuildingListItem {
     color: color,
 }
 
-export struct AnchorLabel {
-    id: int,
+export struct MapMarker {
     x: int,
     y: int,
+    text: string,
     color: color,
+    bg: color,
 }
 
 component BuildingButton inherits Rectangle {
@@ -139,8 +140,10 @@ export component MainWindow inherits Window {
     in-out property <string> status-text: "Ready";
     in property <[OccupiedCellVisual]> occupied-cells;
     in property <[OccupiedCellVisual]> preview-cells;
+    in property <[OccupiedCellVisual]> no-entry-cells;
     in property <[BuildingListItem]> placed-buildings;
-    in property <[AnchorLabel]> entry-labels;
+    in property <[MapMarker]> anchor-labels;
+    in property <[MapMarker]> entry-labels;
     in-out property <bool> show-entry-points: true;
 
     callback place-at(float, float);
@@ -368,13 +371,37 @@ export component MainWindow inherits Window {
                             background: cell.color;
                         }
 
-                        for label in root.entry-labels: Text {
+                        for label in root.anchor-labels: Text {
                             x: label.x * root.cell-px + 1px;
                             y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
-                            text: label.id;
+                            text: label.text;
                             color: label.color;
                             font-size: 10px;
+                        }
+
+                        for label in root.entry-labels: Rectangle {
+                            x: label.x * root.cell-px;
+                            y: (root.map-size - label.y - 1) * root.cell-px;
+                            width: max(1px, root.cell-px - 1px);
+                            height: max(1px, root.cell-px - 1px);
+                            background: label.bg;
                             visible: root.show-entry-points;
+
+                            Text {
+                                x: 1px;
+                                y: max(0px, root.cell-px - 11px);
+                                text: label.text;
+                                color: label.color;
+                                font-size: 10px;
+                            }
+                        }
+
+                        for cell in root.no-entry-cells: Rectangle {
+                            x: cell.x * root.cell-px;
+                            y: (root.map-size - cell.y - 1) * root.cell-px;
+                            width: max(1px, root.cell-px - 1px);
+                            height: max(1px, root.cell-px - 1px);
+                            background: cell.color;
                         }
 
                     }

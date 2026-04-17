@@ -1,6 +1,6 @@
 use simulator::{BuildingType, Simulator};
 
-use crate::{AnchorLabel, BuildingListItem, OccupiedCellVisual};
+use crate::{BuildingListItem, MapMarker, OccupiedCellVisual};
 
 pub fn building_color(building_type: BuildingType) -> slint::Color {
     match building_type {
@@ -72,30 +72,117 @@ pub fn build_building_list(simulator: &Simulator) -> Vec<BuildingListItem> {
     result
 }
 
-pub fn build_entry_labels(simulator: &Simulator) -> Vec<AnchorLabel> {
+pub fn build_anchor_labels(simulator: &Simulator) -> Vec<MapMarker> {
     let mut result = Vec::new();
 
     for building in simulator.buildings() {
+        result.push(MapMarker {
+            x: building.x as i32,
+            y: building.y as i32,
+            text: building.id.to_string().into(),
+            color: slint::Color::from_rgb_u8(20, 20, 20),
+            bg: slint::Color::from_argb_u8(0, 0, 0, 0),
+        });
+    }
+
+    result
+}
+
+pub fn build_entry_labels(simulator: &Simulator) -> Vec<MapMarker> {
+    let mut result = Vec::new();
+    let light_green = slint::Color::from_argb_u8(180, 164, 236, 164);
+
+    for building in simulator.buildings() {
         if let Some(entry) = building.entry_point {
-            result.push(AnchorLabel {
-                id: building.id as i32,
+            result.push(MapMarker {
                 x: entry.x as i32,
                 y: entry.y as i32,
-                color: slint::Color::from_rgb_u8(20, 20, 20),
+                text: building.id.to_string().into(),
+                color: slint::Color::from_rgb_u8(0, 80, 0),
+                bg: light_green,
             });
         }
 
         for component in building.components() {
             if let Some(entry) = component.entry_point {
-                result.push(AnchorLabel {
-                    id: building.id as i32,
+                result.push(MapMarker {
                     x: entry.x as i32,
                     y: entry.y as i32,
-                    color: slint::Color::from_rgb_u8(20, 20, 20),
+                    text: building.id.to_string().into(),
+                    color: slint::Color::from_rgb_u8(0, 80, 0),
+                    bg: light_green,
                 });
             }
         }
     }
 
     result
+}
+
+pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
+    let mut result = Vec::new();
+    let red = slint::Color::from_rgb_u8(220, 40, 40);
+    let map_size = simulator.map_size();
+
+    for building in simulator.buildings() {
+        if building.building_type != BuildingType::GoodsYard && building.entry_point.is_none() {
+            append_diagonal_cells(
+                &mut result,
+                building.x,
+                building.y,
+                building.width(),
+                red,
+                map_size,
+            );
+        }
+
+        for component in building.components() {
+            if component.entry_point.is_none() {
+                append_diagonal_cells(
+                    &mut result,
+                    component.x,
+                    component.y,
+                    component.size,
+                    red,
+                    map_size,
+                );
+            }
+        }
+    }
+
+    result
+}
+
+fn append_diagonal_cells(
+    out: &mut Vec<OccupiedCellVisual>,
+    x: usize,
+    y: usize,
+    size: usize,
+    color: slint::Color,
+    map_size: usize,
+) {
+    if size == 0 {
+        return;
+    }
+
+    for i in 0..size {
+        let p1 = (x + i, y + i);
+        let p2 = (x + i, y + (size - 1 - i));
+
+        if p1.0 < map_size && p1.1 < map_size {
+            out.push(OccupiedCellVisual {
+                x: p1.0 as i32,
+                y: p1.1 as i32,
+                color,
+            });
+        }
+
+        if p2.0 < map_size && p2.1 < map_size && p2 != p1 {
+            out.push(OccupiedCellVisual {
+                x: p2.0 as i32,
+                y: p2.1 as i32,
+                color,
+            });
+        }
+    }
 }

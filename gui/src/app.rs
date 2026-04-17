@@ -105,7 +105,15 @@ fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     let list_model = VecModel::from(list_entries);
     window.set_placed_buildings(ModelRc::new(list_model));
 
-    let labels = visuals::build_entry_labels(state.simulator());
-    let labels_model = VecModel::from(labels);
-    window.set_entry_labels(ModelRc::new(labels_model));
+    let anchor_labels = visuals::build_anchor_labels(state.simulator());
+    let anchor_model = VecModel::from(anchor_labels);
+    window.set_anchor_labels(ModelRc::new(anchor_model));
+
+    let entry_labels = visuals::build_entry_labels(state.simulator());
+    let entry_model = VecModel::from(entry_labels);
+    window.set_entry_labels(ModelRc::new(entry_model));
+
+    let no_entry_cells = visuals::build_no_entry_markers(state.simulator());
+    let no_entry_model = VecModel::from(no_entry_cells);
+    window.set_no_entry_cells(ModelRc::new(no_entry_model));
 }
