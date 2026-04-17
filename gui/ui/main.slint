@@ -1,4 +1,4 @@
-import { Button, HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, CheckBox, HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 
 export struct OccupiedCellVisual {
     x: int,
@@ -140,7 +140,8 @@ export component MainWindow inherits Window {
     in property <[OccupiedCellVisual]> occupied-cells;
     in property <[OccupiedCellVisual]> preview-cells;
     in property <[BuildingListItem]> placed-buildings;
-    in property <[AnchorLabel]> anchor-labels;
+    in property <[AnchorLabel]> entry-labels;
+    in-out property <bool> show-entry-points: true;
 
     callback place-at(float, float);
     callback hover-at(float, float);
@@ -178,6 +179,30 @@ export component MainWindow inherits Window {
                 text: "Assets";
                 font-size: 22px;
                 font-weight: 700;
+            }
+
+            Rectangle {
+                border-width: 1px;
+                border-color: #d9d9d9;
+                border-radius: 6px;
+                background: #fafafa;
+                min-height: 50px;
+
+                HorizontalBox {
+                    padding: 8px;
+                    spacing: 8px;
+
+                    CheckBox {
+                        checked <=> root.show-entry-points;
+                        text: "Plot entry points";
+                    }
+                }
+            }
+
+            Text {
+                text: "Buildings";
+                font-size: 18px;
+                font-weight: 600;
             }
 
             ScrollView {
@@ -343,12 +368,13 @@ export component MainWindow inherits Window {
                             background: cell.color;
                         }
 
-                        for label in root.anchor-labels: Text {
+                        for label in root.entry-labels: Text {
                             x: label.x * root.cell-px + 1px;
                             y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
                             text: label.id;
                             color: label.color;
                             font-size: 10px;
+                            visible: root.show-entry-points;
                         }
 
                     }

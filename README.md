@@ -55,6 +55,12 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 - Placement is rejected if any required cell is out of bounds or already occupied
 - Buildings now carry an optional `entry_point` field (`None` when no access is available)
 - `GoodsYard` itself has no single entry point; instead each of its four 2x2 stock components has its own optional entry point
+- Entry point assignment is automatic on placement:
+  - default: `(x + floor(n/2), y - 1)` where `x,y` is bottom-left and `n` is size
+  - special case: when `n == 2`, default is `(x, y - 1)`
+  - if default is blocked, candidate side-neighbor cells of external square are checked clockwise (corners excluded)
+  - if side-neighbor cells are blocked, corners are checked clockwise starting from `(x + n, y - 1)`
+  - if no candidate is free/in-bounds, entry point remains `None`
 
 ### Initial Building Types
 

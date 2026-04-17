@@ -24,6 +24,10 @@ impl CellMap {
         self.get_cell(x, y).is_some()
     }
 
+    pub fn is_in_bounds(&self, x: usize, y: usize) -> bool {
+        x < self.size && y < self.size
+    }
+
     pub fn can_place(&self, placement: &BuildingPlacement) -> Result<(), MapError> {
         self.can_place_cells(placement.occupied_cells())
     }

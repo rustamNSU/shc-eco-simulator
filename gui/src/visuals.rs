@@ -72,16 +72,29 @@ pub fn build_building_list(simulator: &Simulator) -> Vec<BuildingListItem> {
     result
 }
 
-pub fn build_anchor_labels(simulator: &Simulator) -> Vec<AnchorLabel> {
-    let mut result = Vec::with_capacity(simulator.buildings().len());
+pub fn build_entry_labels(simulator: &Simulator) -> Vec<AnchorLabel> {
+    let mut result = Vec::new();
 
     for building in simulator.buildings() {
-        result.push(AnchorLabel {
-            id: building.id as i32,
-            x: building.x as i32,
-            y: building.y as i32,
-            color: slint::Color::from_rgb_u8(20, 20, 20),
-        });
+        if let Some(entry) = building.entry_point {
+            result.push(AnchorLabel {
+                id: building.id as i32,
+                x: entry.x as i32,
+                y: entry.y as i32,
+                color: slint::Color::from_rgb_u8(20, 20, 20),
+            });
+        }
+
+        for component in building.components() {
+            if let Some(entry) = component.entry_point {
+                result.push(AnchorLabel {
+                    id: building.id as i32,
+                    x: entry.x as i32,
+                    y: entry.y as i32,
+                    color: slint::Color::from_rgb_u8(20, 20, 20),
+                });
+            }
+        }
     }
 
     result

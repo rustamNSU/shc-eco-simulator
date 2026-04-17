@@ -105,7 +105,7 @@ fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     let list_model = VecModel::from(list_entries);
     window.set_placed_buildings(ModelRc::new(list_model));
 
-    let labels = visuals::build_anchor_labels(state.simulator());
+    let labels = visuals::build_entry_labels(state.simulator());
     let labels_model = VecModel::from(labels);
-    window.set_anchor_labels(ModelRc::new(labels_model));
+    window.set_entry_labels(ModelRc::new(labels_model));
 }
