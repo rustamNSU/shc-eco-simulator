@@ -78,6 +78,59 @@ Workshops and armoury currently use a 4x4 square footprint.
 
 `GoodsYard` placement uses a 5x5 template area with four 2x2 corner stockpiles and a free center row/column cross.
 
+### Building Costs and Build Resources
+
+`0` means this resource is not needed.
+
+| Building               | Wood Cost | Gold Cost |
+| ---------------------- | --------- | --------- |
+| Goods Yard             |    0      |     0     |
+| Stockpile              |    0      |     0     |
+| Armoury                |    5      |     0     |
+| Fletchers Workshop     |    20     |     100   |
+| Blacksmiths Workshop   |    20     |     200   |
+| Poleturners Workshop   |    10     |     100   |
+| Armourers Workshop     |    20     |     100   |
+
+### Goods Buy/Sell Costs
+
+| Goods | Sell | Buy |
+| ----- | ---- | --- |
+| Wood  |  1   |  4  |
+| Iron  |  23  | 45  |
+
+### Weapon Production and Sale
+
+Empty cell means this resource is not needed.
+
+Worker can carry only one resource unit from stockpile per trip.
+If a weapon needs `2` wood or `2` iron, that means two separate stockpile-to-workshop paths/trips.
+
+| Weapon   | Workshop              | Wood Req | Iron Req | Make Time (Ticks) | Sell Gold |
+| -------- | --------------------- | -------- | -------- | ----------------- | --------- |
+| Bow      | Fletchers Workshop    |    2     |          |        400        |     15    |
+| Crossbow | Fletchers Workshop    |    3     |          |        565        |     30    |
+| Spear    | Poleturners Workshop  |    1     |          |        300        |     10    |
+| Pike     | Poleturners Workshop  |    2     |          |        600        |     18    |
+| Sword    | Blacksmiths Workshop  |          |    1     |        600        |     30    |
+| Mace     | Blacksmiths Workshop  |          |    1     |        600        |     30    |
+| Armor    | Armourers Workshop    |          |    1     |        625        |     30    |
+
+### Production Cycle Model
+
+- One production cycle starts at the `Armoury` entry point and ends when the worker brings the finished weapon back to the `Armoury` entry point.
+- Workers are simulated logically only. There is no need to animate worker movement in the engine.
+- Workers carry only `1` resource unit per trip from stockpile to workshop.
+- If a weapon needs `N` resource units, that means `N` separate stockpile-to-workshop deliveries inside the cycle.
+- For most workshops the cycle starts:
+  - `Armoury -> required stockpile -> Workshop`
+- Fletcher special case:
+  - default behavior: after a cycle ends at `Armoury`, the next cycle starts with `Armoury -> Fletchers Workshop -> Wood Stockpile`
+  - optimized-fletcher setting: when enabled, Fletchers use the normal direct route and start with `Armoury -> Wood Stockpile`
+- After all required resources are delivered to the workshop, the worker spends `Make Time (Ticks)` crafting the weapon.
+- After crafting finishes, the worker goes `Workshop -> Armoury`, which ends the current cycle.
+- The simulator can store completed cycle counts and totals instead of saving every tiny travel event.
+
 ### Wall Object
 
 - `Wall` is modeled as its own object, not as a building type.

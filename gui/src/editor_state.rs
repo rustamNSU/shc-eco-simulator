@@ -1,6 +1,7 @@
-use crate::backend::BackendCommand;
+use crate::backend::{BackendCommand, CycleSimulationRow};
 use simulator::{
-    BuildingType, DEFAULT_MAP_SIZE, Footprint, Simulator, StockpileResource, walls::line_cells,
+    BuildingType, DEFAULT_MAP_SIZE, Footprint, SimulationSettings, Simulator, StockpileResource,
+    WeaponType, walls::line_cells,
 };
 
 enum SelectedTool {
@@ -21,6 +22,9 @@ pub struct EditorState {
     selected: Option<SelectedTool>,
     hover_cell: Option<(i32, i32)>,
     wall_start: Option<(i32, i32)>,
+    simulation_tooltips_enabled: bool,
+    simulation_settings: SimulationSettings,
+    cycle_rows: Vec<CycleSimulationRow>,
 }
 
 impl EditorState {
@@ -30,6 +34,9 @@ impl EditorState {
             selected: None,
             hover_cell: None,
             wall_start: None,
+            simulation_tooltips_enabled: false,
+            simulation_settings: SimulationSettings::default(),
+            cycle_rows: Vec::new(),
         })
     }
 
@@ -39,6 +46,10 @@ impl EditorState {
 
     pub fn set_simulator(&mut self, simulator: Simulator) {
         self.simulator = simulator;
+    }
+
+    pub fn set_cycle_rows(&mut self, cycle_rows: Option<Vec<CycleSimulationRow>>) {
+        self.cycle_rows = cycle_rows.unwrap_or_default();
     }
 
     pub fn selected_id(&self) -> Option<&'static str> {
@@ -182,6 +193,111 @@ impl EditorState {
 
     pub fn simulator(&self) -> &Simulator {
         &self.simulator
+    }
+
+    pub fn simulation_settings(&self) -> SimulationSettings {
+        self.simulation_settings
+    }
+
+    pub fn game_speed(&self) -> u32 {
+        self.simulation_settings.game_speed_ticks_per_second
+    }
+
+    pub fn optimized_fletcher_routing(&self) -> bool {
+        self.simulation_settings.optimized_fletcher_routing
+    }
+
+    pub fn set_game_speed(&mut self, value: f32) -> bool {
+        let snapped = ((value / 5.0).round() as i32 * 5).clamp(20, 90) as u32;
+        if self.simulation_settings.game_speed_ticks_per_second == snapped {
+            return false;
+        }
+
+        self.simulation_settings.game_speed_ticks_per_second = snapped;
+        true
+    }
+
+    pub fn set_optimized_fletcher_routing(&mut self, enabled: bool) -> bool {
+        if self.simulation_settings.optimized_fletcher_routing == enabled {
+            return false;
+        }
+
+        self.simulation_settings.optimized_fletcher_routing = enabled;
+        true
+    }
+
+    pub fn cycle_rows(&self) -> &[CycleSimulationRow] {
+        &self.cycle_rows
+    }
+
+    pub fn simulation_tooltips_enabled(&self) -> bool {
+        self.simulation_tooltips_enabled
+    }
+
+    pub fn set_simulation_tooltips_enabled(&mut self, enabled: bool) -> bool {
+        if self.simulation_tooltips_enabled == enabled {
+            return false;
+        }
+
+        self.simulation_tooltips_enabled = enabled;
+        true
+    }
+
+    pub fn hovered_building(&self) -> Option<&simulator::BuildingPlacement> {
+        let (hover_x, hover_y) = self.hover_cell?;
+        if hover_x < 0 || hover_y < 0 {
+            return None;
+        }
+
+        let ux = hover_x as usize;
+        let uy = hover_y as usize;
+        self.simulator
+            .buildings()
+            .iter()
+            .find(|building| building.occupied_cells().any(|cell| cell == (ux, uy)))
+    }
+
+    pub fn hover_cell(&self) -> Option<(i32, i32)> {
+        self.hover_cell
+    }
+
+    pub fn fletchers_weapon(&self) -> WeaponType {
+        self.simulation_settings.fletchers_weapon
+    }
+
+    pub fn poleturners_weapon(&self) -> WeaponType {
+        self.simulation_settings.poleturners_weapon
+    }
+
+    pub fn blacksmiths_weapon(&self) -> WeaponType {
+        self.simulation_settings.blacksmiths_weapon
+    }
+
+    pub fn toggle_fletchers_weapon(&mut self) -> WeaponType {
+        self.simulation_settings.fletchers_weapon = match self.simulation_settings.fletchers_weapon
+        {
+            WeaponType::Bow => WeaponType::Crossbow,
+            _ => WeaponType::Bow,
+        };
+        self.simulation_settings.fletchers_weapon
+    }
+
+    pub fn toggle_poleturners_weapon(&mut self) -> WeaponType {
+        self.simulation_settings.poleturners_weapon =
+            match self.simulation_settings.poleturners_weapon {
+                WeaponType::Spear => WeaponType::Pike,
+                _ => WeaponType::Spear,
+            };
+        self.simulation_settings.poleturners_weapon
+    }
+
+    pub fn toggle_blacksmiths_weapon(&mut self) -> WeaponType {
+        self.simulation_settings.blacksmiths_weapon =
+            match self.simulation_settings.blacksmiths_weapon {
+                WeaponType::Sword => WeaponType::Mace,
+                _ => WeaponType::Sword,
+            };
+        self.simulation_settings.blacksmiths_weapon
     }
 
     pub fn clear_pending_wall(&mut self) {

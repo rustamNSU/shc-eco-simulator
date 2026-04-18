@@ -9,7 +9,9 @@ pub use buildings::{
 };
 pub use map::{CellMap, MapError};
 pub use simulation::{
-    BuildingDistance, DistanceKey, GameTime, RemoveOutcome, Simulator, SimulatorError,
+    BuildingDistance, DistanceKey, GameTime, ProductionCycle, ProductionCycleError,
+    ProductionRouteUsage, RemoveOutcome, SimulationSettings, Simulator, SimulatorError,
+    WeaponRecipe, WeaponType,
 };
 pub use walls::WallSegment;
 

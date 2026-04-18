@@ -1,4 +1,4 @@
-import { Button, CheckBox, HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, CheckBox, HorizontalBox, ScrollView, Slider, VerticalBox } from "std-widgets.slint";
 
 export struct OccupiedCellVisual {
     x: int,
@@ -20,6 +20,19 @@ export struct MapMarker {
     text: string,
     color: color,
     bg: color,
+}
+
+export struct SimulationCycleItem {
+    workshop: string,
+    weapon: string,
+    armoury: string,
+    ticks: string,
+    seconds: string,
+    note: string,
+}
+
+export struct SimulationInfoLine {
+    text: string,
 }
 
 component BuildingButton inherits Rectangle {
@@ -66,6 +79,67 @@ component BuildingButton inherits Rectangle {
     TouchArea {
         clicked => {
             root.selected(root.building-id);
+        }
+    }
+}
+
+component SimulationToggleButton inherits Rectangle {
+    in property <string> title;
+    in property <string> weapon-name;
+    in property <image> icon;
+    callback pressed();
+
+    min-height: 44px;
+    max-height: 44px;
+    border-width: 1px;
+    border-color: #cfd6df;
+    border-radius: 8px;
+    background: #ffffff;
+
+    Text {
+        x: 12px;
+        y: 7px;
+        width: parent.width - 52px;
+        text: root.title;
+        font-weight: 600;
+        font-size: 12px;
+        color: #1f2937;
+        overflow: elide;
+    }
+
+    Text {
+        x: 12px;
+        y: 23px;
+        width: parent.width - 52px;
+        text: root.weapon-name;
+        color: #6b7280;
+        font-size: 10px;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: parent.width - 32px;
+        y: 11px;
+        width: 18px;
+        height: 18px;
+        border-width: 1px;
+        border-color: #d8dde5;
+        border-radius: 6px;
+        background: #f8fafc;
+
+        Image {
+            x: 1px;
+            y: 1px;
+            width: 16px;
+            height: 16px;
+            source: root.icon;
+            image-fit: contain;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.pressed();
         }
     }
 }
@@ -144,9 +218,9 @@ component ToolButton inherits Rectangle {
 
 export component MainWindow inherits Window {
     preferred-width: 1280px;
-    preferred-height: 820px;
+    preferred-height: 940px;
     min-width: 1068px;
-    min-height: 700px;
+    min-height: 820px;
     title: "SHC Eco Simulator - Map Editor";
 
     in property <int> map-size: 100;
@@ -160,7 +234,21 @@ export component MainWindow inherits Window {
     in property <[MapMarker]> anchor-labels;
     in property <[MapMarker]> entry-labels;
     in property <[MapMarker]> resource-labels;
+    in property <[SimulationCycleItem]> simulation-cycles;
+    in property <string> simulation-info-title: "";
+    in property <string> simulation-info-subtitle: "";
+    in property <[SimulationInfoLine]> simulation-info-lines;
+    in-out property <bool> simulation-tooltips-enabled: false;
+    in-out property <bool> simulation-tooltip-visible: false;
+    in-out property <int> simulation-tooltip-x: 0;
+    in-out property <int> simulation-tooltip-y: 0;
+    in-out property <int> simulation-tooltip-height: 80;
     in-out property <bool> show-entry-points: true;
+    in-out property <bool> optimize-fletcher-routing: false;
+    in-out property <int> game-speed: 50;
+    in-out property <string> fletchers-weapon: "bow";
+    in-out property <string> poleturners-weapon: "spear";
+    in-out property <string> blacksmiths-weapon: "sword";
 
     callback place-at(float, float);
     callback hover-at(float, float);
@@ -168,7 +256,13 @@ export component MainWindow inherits Window {
     callback clear-selection();
     callback adjust-zoom(float);
     callback remove-all-walls();
-    callback calculate-worker-distances();
+    callback set-optimize-fletcher-routing(bool);
+    callback set-game-speed(float);
+    callback run-simulation();
+    callback set-simulation-tooltips-enabled(bool);
+    callback toggle-fletchers-weapon();
+    callback toggle-poleturners-weapon();
+    callback toggle-blacksmiths-weapon();
 
     private property <length> cell-px: 10px * root.zoom;
     private property <length> map-px: root.map-size * root.cell-px;
@@ -181,6 +275,9 @@ export component MainWindow inherits Window {
     private property <length> map-panel-width:
         root.width - root.assets-panel-width - root.placed-panel-width
         - (root.outer-padding * 2) - (root.panel-gap * 2);
+    private property <length> map-frame-max-width: 620px;
+    private property <length> map-frame-width: min(root.map-panel-width - 20px, root.map-frame-max-width);
+    private property <length> map-frame-height: root.map-frame-width / 1.618;
 
     assets-panel := Rectangle {
         x: root.outer-padding;
@@ -212,16 +309,16 @@ export component MainWindow inherits Window {
                         text: "Plot entry points";
                     }
 
+                    CheckBox {
+                        checked: root.optimize-fletcher-routing;
+                        text: "Optimize Fletcher";
+                        toggled => { root.set-optimize-fletcher-routing(self.checked); }
+                    }
+
                     Button {
                         text: "Remove All Walls";
                         horizontal-stretch: 1;
                         clicked => { root.remove-all-walls(); }
-                    }
-
-                    Button {
-                        text: "Calculate Worker Distances";
-                        horizontal-stretch: 1;
-                        clicked => { root.calculate-worker-distances(); }
                     }
 
                     Button {
@@ -372,190 +469,420 @@ export component MainWindow inherits Window {
                 }
             }
 
-            Rectangle {
-                border-width: 1px;
-                border-color: #e1e1e1;
-                background: #f2f4f6;
-                horizontal-stretch: 1;
-                vertical-stretch: 1;
-
-                map-scroll := ScrollView {
-                    width: 100%;
-                    height: 100%;
-                    viewport-width: root.map-px;
-                    viewport-height: root.map-px;
-                    mouse-drag-pan-enabled: false;
-
-                    Rectangle {
-                        width: root.map-px;
-                        height: root.map-px;
-                        background: #f8f8f8;
-
-                        for x in root.grid-count: Rectangle {
-                            x: x * root.cell-px;
-                            y: 0px;
-                            width: 1px;
-                            height: root.map-px;
-                            background: #d8d8d8;
-                        }
-
-                        for y in root.grid-count: Rectangle {
-                            x: 0px;
-                            y: y * root.cell-px;
-                            width: root.map-px;
-                            height: 1px;
-                            background: #d8d8d8;
-                        }
-
-                        for cell in root.occupied-cells: Rectangle {
-                            x: cell.x * root.cell-px;
-                            y: (root.map-size - cell.y - 1) * root.cell-px;
-                            width: max(1px, root.cell-px - 1px);
-                            height: max(1px, root.cell-px - 1px);
-                            background: cell.color;
-                        }
-
-                        for cell in root.preview-cells: Rectangle {
-                            x: cell.x * root.cell-px;
-                            y: (root.map-size - cell.y - 1) * root.cell-px;
-                            width: max(1px, root.cell-px - 1px);
-                            height: max(1px, root.cell-px - 1px);
-                            background: cell.color;
-                        }
-
-                        for label in root.anchor-labels: Text {
-                            x: label.x * root.cell-px + 1px;
-                            y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
-                            text: label.text;
-                            color: label.color;
-                            font-size: 10px;
-                        }
-
-                        for label in root.entry-labels: Rectangle {
-                            x: label.x * root.cell-px;
-                            y: (root.map-size - label.y - 1) * root.cell-px;
-                            width: max(1px, root.cell-px - 1px);
-                            height: max(1px, root.cell-px - 1px);
-                            background: label.bg;
-                            visible: root.show-entry-points;
-
-                            Text {
-                                x: 1px;
-                                y: max(0px, root.cell-px - 11px);
-                                text: label.text;
-                                color: label.color;
-                                font-size: 10px;
-                            }
-                        }
-
-                        for label in root.resource-labels: Rectangle {
-                            x: label.x * root.cell-px;
-                            y: (root.map-size - label.y - 1) * root.cell-px;
-                            width: max(1px, root.cell-px - 1px);
-                            height: max(1px, root.cell-px - 1px);
-                            background: label.bg;
-
-                            Text {
-                                x: 1px;
-                                y: max(0px, root.cell-px - 11px);
-                                text: label.text;
-                                color: label.color;
-                                font-size: 10px;
-                            }
-                        }
-
-                        for cell in root.no-entry-cells: Rectangle {
-                            x: cell.x * root.cell-px;
-                            y: (root.map-size - cell.y - 1) * root.cell-px;
-                            width: max(1px, root.cell-px - 1px);
-                            height: max(1px, root.cell-px - 1px);
-                            background: cell.color;
-                        }
-
-                    }
+            HorizontalBox {
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
 
-                TouchArea {
-                    width: 100%;
-                    height: 100%;
+                Rectangle {
+                    width: root.map-frame-width;
+                    height: root.map-frame-height;
+                    border-width: 1px;
+                    border-color: #dde3ea;
+                    border-radius: 8px;
+                    background: #f2f4f6;
 
-                    property <length> start-mouse-x: 0px;
-                    property <length> start-mouse-y: 0px;
-                    property <length> start-viewport-x: 0px;
-                    property <length> start-viewport-y: 0px;
-                    property <bool> was-dragging: false;
-                    property <bool> pan-active: false;
+                    map-scroll := ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: root.map-px;
+                        viewport-height: root.map-px;
+                        mouse-drag-pan-enabled: false;
 
-                    moved => {
-                        if self.pan-active {
-                            let dx = self.mouse-x - self.start-mouse-x;
-                            let dy = self.mouse-y - self.start-mouse-y;
+                        Rectangle {
+                            width: root.map-px;
+                            height: root.map-px;
+                            background: #f8f8f8;
 
-                            if abs(dx) > 3px || abs(dy) > 3px {
-                                self.was-dragging = true;
+                            for x in root.grid-count: Rectangle {
+                                x: x * root.cell-px;
+                                y: 0px;
+                                width: 1px;
+                                height: root.map-px;
+                                background: #d8d8d8;
                             }
 
-                            map-scroll.viewport-x = min(
-                                0px,
-                                max(
-                                    map-scroll.visible-width - root.map-px,
-                                    self.start-viewport-x + dx,
-                                ),
-                            );
-                            map-scroll.viewport-y = min(
-                                0px,
-                                max(
-                                    map-scroll.visible-height - root.map-px,
-                                    self.start-viewport-y + dy,
-                                ),
-                            );
+                            for y in root.grid-count: Rectangle {
+                                x: 0px;
+                                y: y * root.cell-px;
+                                width: root.map-px;
+                                height: 1px;
+                                background: #d8d8d8;
+                            }
+
+                            for cell in root.occupied-cells: Rectangle {
+                                x: cell.x * root.cell-px;
+                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                width: max(1px, root.cell-px - 1px);
+                                height: max(1px, root.cell-px - 1px);
+                                background: cell.color;
+                            }
+
+                            for cell in root.preview-cells: Rectangle {
+                                x: cell.x * root.cell-px;
+                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                width: max(1px, root.cell-px - 1px);
+                                height: max(1px, root.cell-px - 1px);
+                                background: cell.color;
+                            }
+
+                            for label in root.anchor-labels: Text {
+                                x: label.x * root.cell-px + 1px;
+                                y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
+                                text: label.text;
+                                color: label.color;
+                                font-size: 10px;
+                            }
+
+                            for label in root.entry-labels: Rectangle {
+                                x: label.x * root.cell-px;
+                                y: (root.map-size - label.y - 1) * root.cell-px;
+                                width: max(1px, root.cell-px - 1px);
+                                height: max(1px, root.cell-px - 1px);
+                                background: label.bg;
+                                visible: root.show-entry-points;
+
+                                Text {
+                                    x: 1px;
+                                    y: max(0px, root.cell-px - 11px);
+                                    text: label.text;
+                                    color: label.color;
+                                    font-size: 10px;
+                                }
+                            }
+
+                            for label in root.resource-labels: Rectangle {
+                                x: label.x * root.cell-px;
+                                y: (root.map-size - label.y - 1) * root.cell-px;
+                                width: max(1px, root.cell-px - 1px);
+                                height: max(1px, root.cell-px - 1px);
+                                background: label.bg;
+
+                                Text {
+                                    x: 1px;
+                                    y: max(0px, root.cell-px - 11px);
+                                    text: label.text;
+                                    color: label.color;
+                                    font-size: 10px;
+                                }
+                            }
+
+                            for cell in root.no-entry-cells: Rectangle {
+                                x: cell.x * root.cell-px;
+                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                width: max(1px, root.cell-px - 1px);
+                                height: max(1px, root.cell-px - 1px);
+                                background: cell.color;
+                            }
+
                         }
                     }
 
-                    pointer-event(event) => {
-                        if event.kind == PointerEventKind.move && !self.pan-active {
-                            root.hover-at(
-                                (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
-                                (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
-                            );
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+
+                        property <length> start-mouse-x: 0px;
+                        property <length> start-mouse-y: 0px;
+                        property <length> start-viewport-x: 0px;
+                        property <length> start-viewport-y: 0px;
+                        property <bool> was-dragging: false;
+                        property <bool> pan-active: false;
+
+                        moved => {
+                            if self.pan-active {
+                                let dx = self.mouse-x - self.start-mouse-x;
+                                let dy = self.mouse-y - self.start-mouse-y;
+
+                                if abs(dx) > 3px || abs(dy) > 3px {
+                                    self.was-dragging = true;
+                                }
+
+                                map-scroll.viewport-x = min(
+                                    0px,
+                                    max(
+                                        map-scroll.visible-width - root.map-px,
+                                        self.start-viewport-x + dx,
+                                    ),
+                                );
+                                map-scroll.viewport-y = min(
+                                    0px,
+                                    max(
+                                        map-scroll.visible-height - root.map-px,
+                                        self.start-viewport-y + dy,
+                                    ),
+                                );
+                            }
                         }
 
-                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                            self.start-mouse-x = self.mouse-x;
-                            self.start-mouse-y = self.mouse-y;
-                            self.start-viewport-x = map-scroll.viewport-x;
-                            self.start-viewport-y = map-scroll.viewport-y;
-                            self.was-dragging = false;
-                            self.pan-active = true;
-                        }
-
-                        if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
-                            if !self.was-dragging {
-                                root.place-at(
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.move && !self.pan-active {
+                                root.hover-at(
                                     (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
                                     (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
                                 );
                             }
-                            self.pan-active = false;
+
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                self.start-mouse-x = self.mouse-x;
+                                self.start-mouse-y = self.mouse-y;
+                                self.start-viewport-x = map-scroll.viewport-x;
+                                self.start-viewport-y = map-scroll.viewport-y;
+                                self.was-dragging = false;
+                                self.pan-active = true;
+                            }
+
+                            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                if !self.was-dragging {
+                                    root.place-at(
+                                        (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
+                                        (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
+                                    );
+                                }
+                                self.pan-active = false;
+                            }
+
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                root.clear-selection();
+                            }
                         }
 
-                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                            root.clear-selection();
+                        scroll-event(event) => {
+                            if event.delta-y > 0 {
+                                root.adjust-zoom(0.1);
+                                return accept;
+                            }
+
+                            if event.delta-y < 0 {
+                                root.adjust-zoom(-0.1);
+                                return accept;
+                            }
+
+                            reject
                         }
                     }
 
-                    scroll-event(event) => {
-                        if event.delta-y > 0 {
-                            root.adjust-zoom(0.1);
-                            return accept;
+                    tooltip := Rectangle {
+                        visible: root.simulation-tooltip-visible;
+                        x: min(
+                            parent.width - self.width - 10px,
+                            max(10px, root.simulation-tooltip-x * 1px),
+                        );
+                        y: min(
+                            parent.height - self.height - 10px,
+                            max(10px, root.simulation-tooltip-y * 1px),
+                        );
+                        width: 250px;
+                        height: root.simulation-tooltip-height * 1px;
+                        border-width: 1px;
+                        border-color: #88cfd6df;
+                        border-radius: 0px;
+                        background: #b3fffdf5;
+
+                        VerticalBox {
+                            padding: 10px;
+                            spacing: 3px;
+
+                            Text {
+                                text: root.simulation-info-title;
+                                font-weight: 700;
+                                color: #1f2937;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                text: root.simulation-info-subtitle;
+                                color: #5f6b7b;
+                                visible: root.simulation-info-subtitle != "";
+                                wrap: word-wrap;
+                            }
+
+                            for line in root.simulation-info-lines: Text {
+                                text: line.text;
+                                color: #4b5563;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                border-width: 1px;
+                border-color: #d9dde2;
+                border-radius: 8px;
+                background: #ffffff;
+
+                VerticalBox {
+                    padding: 14px;
+                    spacing: 10px;
+
+                    HorizontalBox {
+                        min-height: 42px;
+                        max-height: 42px;
+                        spacing: 10px;
+
+                        VerticalBox {
+                            spacing: 1px;
+                            alignment: start;
+
+                            Text {
+                                text: "Simulation";
+                                font-size: 19px;
+                                font-weight: 700;
+                                color: #1f2937;
+                            }
+
+                            Text {
+                                text: "Workshop cycle preview";
+                                color: #5f6b7b;
+                                font-size: 12px;
+                            }
                         }
 
-                        if event.delta-y < 0 {
-                            root.adjust-zoom(-0.1);
-                            return accept;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: transparent;
                         }
 
-                        reject
+                        Button {
+                            text: "Run Simulation";
+                            clicked => { root.run-simulation(); }
+                        }
+                    }
+
+                    HorizontalBox {
+                        spacing: 8px;
+                        min-height: 44px;
+                        max-height: 44px;
+
+                        SimulationToggleButton {
+                            title: "Fletchers";
+                            weapon-name: root.fletchers-weapon == "crossbow" ? "Crossbow" : "Bow";
+                            icon: root.fletchers-weapon == "crossbow"
+                                ? @image-url("../assets/goods/crossbow.png")
+                                : @image-url("../assets/goods/bow.png");
+                            pressed => { root.toggle-fletchers-weapon(); }
+                        }
+
+                        SimulationToggleButton {
+                            title: "Poleturners";
+                            weapon-name: root.poleturners-weapon == "pike" ? "Pike" : "Spear";
+                            icon: root.poleturners-weapon == "pike"
+                                ? @image-url("../assets/goods/pike.png")
+                                : @image-url("../assets/goods/spear.png");
+                            pressed => { root.toggle-poleturners-weapon(); }
+                        }
+
+                        SimulationToggleButton {
+                            title: "Blacksmiths";
+                            weapon-name: root.blacksmiths-weapon == "mace" ? "Mace" : "Sword";
+                            icon: root.blacksmiths-weapon == "mace"
+                                ? @image-url("../assets/goods/mace.png")
+                                : @image-url("../assets/goods/sword.png");
+                            pressed => { root.toggle-blacksmiths-weapon(); }
+                        }
+                    }
+
+                    HorizontalBox {
+                        spacing: 10px;
+                        min-height: 28px;
+                        max-height: 28px;
+
+                        Text {
+                            text: "Game Speed";
+                            vertical-alignment: center;
+                            min-width: 86px;
+                            color: #1f2937;
+                        }
+
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 20;
+                            maximum: 90;
+                            value: root.game-speed;
+                            changed(value) => { root.set-game-speed(value); }
+                        }
+
+                        Text {
+                            text: root.game-speed + " GS";
+                            vertical-alignment: center;
+                            min-width: 48px;
+                            horizontal-alignment: right;
+                            color: #1f2937;
+                        }
+                    }
+
+                    CheckBox {
+                        checked: root.simulation-tooltips-enabled;
+                        text: "Show tooltips";
+                        toggled => { root.set-simulation-tooltips-enabled(self.checked); }
+                    }
+
+                    Rectangle {
+                        border-width: 1px;
+                        border-color: #d9dde2;
+                        border-radius: 6px;
+                        background: #ffffff;
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+
+                        Text {
+                            x: 12px;
+                            y: 12px;
+                            text: "Run simulation to calculate workshop cycle time.";
+                            color: #6b7280;
+                            visible: root.simulation-cycles.length == 0;
+                        }
+
+                        ScrollView {
+                            width: 100%;
+                            height: 100%;
+                            visible: root.simulation-cycles.length > 0;
+
+                            VerticalBox {
+                                width: 100%;
+                                spacing: 6px;
+                                padding: 8px;
+
+                                for item in root.simulation-cycles: Rectangle {
+                                    min-height: 74px;
+                                    border-width: 1px;
+                                    border-color: #d8dde5;
+                                    border-radius: 6px;
+                                    background: #f9fafc;
+
+                                    VerticalBox {
+                                        padding: 8px;
+                                        spacing: 4px;
+
+                                        Text {
+                                            text: item.workshop + " - " + item.weapon;
+                                            font-weight: 600;
+                                            color: #1f2937;
+                                        }
+
+                                        Text {
+                                            text: "Armoury: " + item.armoury + " | Ticks: " + item.ticks + " | Seconds: " + item.seconds;
+                                            color: #4b5563;
+                                        }
+
+                                        Text {
+                                            text: item.note;
+                                            color: #6b7280;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

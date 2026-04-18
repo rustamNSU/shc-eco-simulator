@@ -10,6 +10,11 @@ use super::{
     BuildingDistance, DistanceKey, GameTime,
     entry_logic::{calculate_building_entry, resolve_entry_point_for_square, wall_contains_cell},
     pathfinding::recompute_building_distances,
+    production_cycle::{
+        ProductionCycle, ProductionCycleError, ProductionRouteUsage, SimulationSettings,
+        WeaponType, distance_cells, find_building, find_stockpile_for_resource,
+        travel_ticks_for_distance,
+    },
     worker_distance::build_worker_distances,
 };
 
@@ -262,6 +267,69 @@ impl Simulator {
         self.worker_distances.len()
     }
 
+    pub fn calculate_production_cycle(
+        &self,
+        weapon_type: WeaponType,
+        workshop_id: u32,
+        armoury_id: u32,
+        settings: SimulationSettings,
+    ) -> Result<ProductionCycle, ProductionCycleError> {
+        let recipe = weapon_type.recipe();
+        let workshop = find_building(&self.buildings, workshop_id)
+            .ok_or(ProductionCycleError::WorkshopNotFound { workshop_id })?;
+        let armoury = find_building(&self.buildings, armoury_id)
+            .ok_or(ProductionCycleError::ArmouryNotFound { armoury_id })?;
+
+        if workshop.building_type != recipe.workshop_type {
+            return Err(ProductionCycleError::ExpectedWorkshop {
+                workshop_id,
+                actual_type: workshop.building_type,
+                expected_type: recipe.workshop_type,
+            });
+        }
+
+        if armoury.building_type != BuildingType::Armoury {
+            return Err(ProductionCycleError::ExpectedArmoury {
+                armoury_id,
+                actual_type: armoury.building_type,
+            });
+        }
+
+        let mut route_usage = Vec::new();
+        self.append_resource_phase_routes(
+            &mut route_usage,
+            workshop_id,
+            armoury_id,
+            settings,
+            StockpileResource::Wood,
+            recipe.wood_required,
+            recipe.workshop_type,
+        )?;
+        self.append_resource_phase_routes(
+            &mut route_usage,
+            workshop_id,
+            armoury_id,
+            settings,
+            StockpileResource::Iron,
+            recipe.iron_required,
+            recipe.workshop_type,
+        )?;
+        self.push_route_usage(
+            &mut route_usage,
+            recipe.workshop_type,
+            workshop_id,
+            armoury_id,
+            1,
+        )?;
+
+        Ok(ProductionCycle::from_route_usage(
+            recipe,
+            workshop_id,
+            armoury_id,
+            route_usage,
+        ))
+    }
+
     pub fn set_stockpile_resource_at(
         &mut self,
         x: usize,
@@ -413,13 +481,111 @@ impl Simulator {
     fn recompute_worker_distances(&mut self) {
         self.worker_distances = build_worker_distances(&self.buildings, &self.distances);
     }
+
+    fn append_resource_phase_routes(
+        &self,
+        route_usage: &mut Vec<ProductionRouteUsage>,
+        workshop_id: u32,
+        armoury_id: u32,
+        settings: SimulationSettings,
+        resource: StockpileResource,
+        required_units: u32,
+        workshop_type: BuildingType,
+    ) -> Result<(), ProductionCycleError> {
+        if required_units == 0 {
+            return Ok(());
+        }
+
+        let stockpile = find_stockpile_for_resource(&self.buildings, resource)
+            .ok_or(ProductionCycleError::MissingStockpile { resource })?;
+        let stockpile_id = stockpile.id;
+        let starts_from_workshop = workshop_type == BuildingType::FletchersWorkshop
+            && !settings.optimized_fletcher_routing;
+
+        if starts_from_workshop {
+            self.push_route_usage(route_usage, workshop_type, armoury_id, workshop_id, 1)?;
+            self.push_route_usage(
+                route_usage,
+                workshop_type,
+                workshop_id,
+                stockpile_id,
+                required_units,
+            )?;
+        } else {
+            self.push_route_usage(route_usage, workshop_type, armoury_id, stockpile_id, 1)?;
+            if required_units > 1 {
+                self.push_route_usage(
+                    route_usage,
+                    workshop_type,
+                    workshop_id,
+                    stockpile_id,
+                    required_units - 1,
+                )?;
+            }
+        }
+
+        self.push_route_usage(
+            route_usage,
+            workshop_type,
+            stockpile_id,
+            workshop_id,
+            required_units,
+        )?;
+
+        Ok(())
+    }
+
+    fn push_route_usage(
+        &self,
+        route_usage: &mut Vec<ProductionRouteUsage>,
+        workshop_type: BuildingType,
+        start_building_id: u32,
+        finish_building_id: u32,
+        trips: u32,
+    ) -> Result<(), ProductionCycleError> {
+        if trips == 0 {
+            return Ok(());
+        }
+
+        let distance_cells = distance_cells(
+            &self.worker_distances,
+            start_building_id,
+            finish_building_id,
+        )?;
+        let total_distance_cells = distance_cells * trips;
+        let total_ticks =
+            travel_ticks_for_distance(workshop_type, distance_cells) * u64::from(trips);
+
+        if let Some(existing) = route_usage.iter_mut().find(|usage| {
+            usage.start_building_id == start_building_id
+                && usage.finish_building_id == finish_building_id
+        }) {
+            existing.trips += trips;
+            existing.total_distance_cells += total_distance_cells;
+            existing.total_ticks += total_ticks;
+            return Ok(());
+        }
+
+        route_usage.push(ProductionRouteUsage {
+            start_building_id,
+            finish_building_id,
+            trips,
+            distance_cells_per_trip: distance_cells,
+            total_distance_cells,
+            total_ticks,
+        });
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::buildings::{BuildingType, EntryPoint, StockpileResource};
 
-    use super::{DistanceKey, RemoveOutcome, Simulator, SimulatorError};
+    use super::{
+        DistanceKey, RemoveOutcome, SimulationSettings, Simulator, SimulatorError, WeaponType,
+    };
 
     #[test]
     fn places_workshop_when_space_is_free() {
@@ -906,5 +1072,145 @@ mod tests {
                 .worker_distance_between(armoury_id, iron_stockpile_id)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn bow_cycle_starts_from_armoury_and_returns_to_armoury() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(2, 2, StockpileResource::Wood)
+            .expect("wood stockpile should be marked");
+        let workshop_id = simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 2)
+            .expect("fletchers workshop should be placed");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+        let wood_stockpile_id = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.stockpile_resource == Some(StockpileResource::Wood))
+            .expect("wood stockpile should exist")
+            .id;
+
+        let cycle = simulator
+            .calculate_production_cycle(
+                WeaponType::Bow,
+                workshop_id,
+                armoury_id,
+                SimulationSettings::default(),
+            )
+            .expect("bow cycle should be calculated");
+
+        assert_eq!(cycle.recipe.wood_required, 2);
+        assert_eq!(cycle.route_usage.len(), 4);
+        assert_eq!(cycle.route_usage[0].start_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[0].finish_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[0].trips, 1);
+        assert_eq!(cycle.route_usage[1].start_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[1].finish_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[1].trips, 2);
+        assert_eq!(cycle.route_usage[2].start_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[2].finish_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[2].trips, 2);
+        assert_eq!(cycle.route_usage[3].start_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[3].finish_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[3].trips, 1);
+        assert_eq!(cycle.total_ticks, cycle.travel_ticks + cycle.make_ticks);
+    }
+
+    #[test]
+    fn optimized_fletcher_cycle_goes_directly_from_armoury_to_stockpile() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(2, 2, StockpileResource::Wood)
+            .expect("wood stockpile should be marked");
+        let workshop_id = simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 2)
+            .expect("fletchers workshop should be placed");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+        let wood_stockpile_id = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.stockpile_resource == Some(StockpileResource::Wood))
+            .expect("wood stockpile should exist")
+            .id;
+
+        let cycle = simulator
+            .calculate_production_cycle(
+                WeaponType::Bow,
+                workshop_id,
+                armoury_id,
+                SimulationSettings {
+                    optimized_fletcher_routing: true,
+                    ..SimulationSettings::default()
+                },
+            )
+            .expect("optimized bow cycle should be calculated");
+
+        assert_eq!(cycle.route_usage.len(), 4);
+        assert_eq!(cycle.route_usage[0].start_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[0].finish_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[0].trips, 1);
+        assert_eq!(cycle.route_usage[1].start_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[1].finish_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[1].trips, 1);
+        assert_eq!(cycle.route_usage[2].start_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[2].finish_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[2].trips, 2);
+        assert_eq!(cycle.route_usage[3].start_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[3].finish_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[3].trips, 1);
+    }
+
+    #[test]
+    fn spear_cycle_uses_armoury_to_stockpile_to_workshop_pattern() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(2, 2, StockpileResource::Wood)
+            .expect("wood stockpile should be marked");
+        let workshop_id = simulator
+            .place_building(BuildingType::PoleturnersWorkshop, 10, 2)
+            .expect("poleturners workshop should be placed");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+        let wood_stockpile_id = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.stockpile_resource == Some(StockpileResource::Wood))
+            .expect("wood stockpile should exist")
+            .id;
+
+        let cycle = simulator
+            .calculate_production_cycle(
+                WeaponType::Spear,
+                workshop_id,
+                armoury_id,
+                SimulationSettings::default(),
+            )
+            .expect("spear cycle should be calculated");
+
+        assert_eq!(cycle.route_usage.len(), 3);
+        assert_eq!(cycle.route_usage[0].start_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[0].finish_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[0].trips, 1);
+        assert_eq!(cycle.route_usage[1].start_building_id, wood_stockpile_id);
+        assert_eq!(cycle.route_usage[1].finish_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[1].trips, 1);
+        assert_eq!(cycle.route_usage[2].start_building_id, workshop_id);
+        assert_eq!(cycle.route_usage[2].finish_building_id, armoury_id);
+        assert_eq!(cycle.route_usage[2].trips, 1);
     }
 }
