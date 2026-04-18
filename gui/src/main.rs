@@ -6,6 +6,7 @@
 slint::include_modules!();
 
 mod app;
+mod backend;
 mod editor_state;
 mod visuals;
 

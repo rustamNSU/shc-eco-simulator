@@ -1,6 +1,6 @@
 use super::{BuildingPlacement, BuildingType, Footprint};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BuildingFactory {
     next_id: u32,
     next_goods_yard_group_id: u32,

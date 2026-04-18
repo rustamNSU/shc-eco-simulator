@@ -1,24 +1,54 @@
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, Mutex};
 
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::{
     MainWindow,
+    backend::{BackendCommand, BackendHandle},
     editor_state::{EditorState, PlacementOutcome},
     visuals,
 };
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let window = MainWindow::new()?;
-    let state = Rc::new(RefCell::new(EditorState::new()?));
+    let state = Arc::new(Mutex::new(EditorState::new()?));
 
-    refresh_view(&window, &state.borrow(), "Ready");
+    {
+        let state = state
+            .lock()
+            .expect("editor state lock should not be poisoned");
+        refresh_view(&window, &state, "Ready");
+    }
+
+    let backend_window = window.as_weak();
+    let backend_state = Arc::clone(&state);
+    let backend = BackendHandle::spawn(
+        {
+            let state = state
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.map_size()
+        },
+        move |simulator, message| {
+            let backend_state = Arc::clone(&backend_state);
+            let message = message;
+            let _ = backend_window.upgrade_in_event_loop(move |window| {
+                let mut state = backend_state
+                    .lock()
+                    .expect("editor state lock should not be poisoned");
+                state.set_simulator(simulator);
+                refresh_view(&window, &state, &message);
+            });
+        },
+    )?;
 
     let weak_window = window.as_weak();
-    let state_for_select = Rc::clone(&state);
+    let state_for_select = Arc::clone(&state);
     window.on_select_building(move |tool_id| {
         if let Some(window) = weak_window.upgrade() {
-            let mut state = state_for_select.borrow_mut();
+            let mut state = state_for_select
+                .lock()
+                .expect("editor state lock should not be poisoned");
             let message = if state.set_selected_from_id(tool_id.as_str()) {
                 format!("Selected: {}", state.selected_label())
             } else {
@@ -29,69 +59,51 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
-    let state_for_place = Rc::clone(&state);
+    let state_for_place = Arc::clone(&state);
+    let backend_for_place = backend.clone();
     window.on_place_at(move |x, y| {
         if let Some(window) = weak_window.upgrade() {
-            let mut state = state_for_place.borrow_mut();
-            let cell_x = x.floor() as i32;
-            let cell_y = y.floor() as i32;
-            let message = match state.place_selected(x, y) {
-                Ok(PlacementOutcome::Building { id, name }) => {
-                    format!("Placed {} #{} at ({}, {})", name, id, cell_x, cell_y)
+            let mut state = state_for_place
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            match state.place_selected(x, y) {
+                Ok(PlacementOutcome::Status(message)) => {
+                    refresh_view(&window, &state, &message);
                 }
-                Ok(PlacementOutcome::WallStart { x, y }) => {
-                    format!("Wall start set at ({}, {})", x, y)
+                Ok(PlacementOutcome::BackendCommand(command)) => {
+                    let send_result = backend_for_place.send(command);
+                    let message = match send_result {
+                        Ok(()) => "Processing...".to_string(),
+                        Err(error) => error,
+                    };
+                    refresh_view(&window, &state, &message);
                 }
-                Ok(PlacementOutcome::WallPlaced { id, start, end }) => {
-                    format!(
-                        "Placed Wall #{} from ({}, {}) to ({}, {})",
-                        id, start.0, start.1, end.0, end.1
-                    )
+                Err(error) => {
+                    refresh_view(&window, &state, &format!("Placement failed: {}", error));
                 }
-                Ok(PlacementOutcome::RemovedBuildings {
-                    removed_ids,
-                    goods_yard_group_id,
-                }) => {
-                    if removed_ids.is_empty() {
-                        "Nothing removed".to_string()
-                    } else if let Some(group_id) = goods_yard_group_id {
-                        format!(
-                            "Removed Goods Yard group #{} ({} stockpiles)",
-                            group_id,
-                            removed_ids.len()
-                        )
-                    } else {
-                        format!("Removed building #{}", removed_ids[0])
-                    }
-                }
-                Ok(PlacementOutcome::RemovedWall { id }) => format!("Removed Wall #{}", id),
-                Ok(PlacementOutcome::StockpileMarked { id, resource }) => {
-                    format!("Marked stockpile #{} as {}", id, resource.display_name())
-                }
-                Ok(PlacementOutcome::NothingToRemove) => {
-                    "Nothing to remove at this cell".to_string()
-                }
-                Err(error) => format!("Placement failed: {}", error),
-            };
-            refresh_view(&window, &state, &message);
+            }
         }
     });
 
     let weak_window = window.as_weak();
-    let state_for_clear = Rc::clone(&state);
+    let state_for_clear = Arc::clone(&state);
     window.on_clear_selection(move || {
         if let Some(window) = weak_window.upgrade() {
-            let mut state = state_for_clear.borrow_mut();
+            let mut state = state_for_clear
+                .lock()
+                .expect("editor state lock should not be poisoned");
             state.clear_selection();
             refresh_view(&window, &state, "Build mode disabled");
         }
     });
 
     let weak_window = window.as_weak();
-    let state_for_hover = Rc::clone(&state);
+    let state_for_hover = Arc::clone(&state);
     window.on_hover_at(move |x, y| {
         if let Some(window) = weak_window.upgrade() {
-            let mut state = state_for_hover.borrow_mut();
+            let mut state = state_for_hover
+                .lock()
+                .expect("editor state lock should not be poisoned");
             state.set_hover_cell(x, y);
             refresh_preview(&window, &state);
         }
@@ -107,16 +119,36 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
-    let state_for_remove_walls = Rc::clone(&state);
+    let state_for_remove_walls = Arc::clone(&state);
+    let backend_for_remove_walls = backend.clone();
     window.on_remove_all_walls(move || {
         if let Some(window) = weak_window.upgrade() {
-            let mut state = state_for_remove_walls.borrow_mut();
-            let removed = state.remove_all_walls();
-            let message = if removed == 0 {
-                "No walls to remove".to_string()
-            } else {
-                format!("Removed {} wall segment(s)", removed)
+            let mut state = state_for_remove_walls
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.clear_pending_wall();
+            let message = match backend_for_remove_walls.send(BackendCommand::RemoveAllWalls) {
+                Ok(()) => "Processing...".to_string(),
+                Err(error) => error,
             };
+            refresh_view(&window, &state, &message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_worker_distances = Arc::clone(&state);
+    let backend_for_worker_distances = backend;
+    window.on_calculate_worker_distances(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_worker_distances
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.clear_pending_wall();
+            let message =
+                match backend_for_worker_distances.send(BackendCommand::CalculateWorkerDistances) {
+                    Ok(()) => "Processing...".to_string(),
+                    Err(error) => error,
+                };
             refresh_view(&window, &state, &message);
         }
     });

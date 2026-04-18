@@ -10,9 +10,10 @@ use super::{
     BuildingDistance, DistanceKey, GameTime,
     entry_logic::{calculate_building_entry, resolve_entry_point_for_square, wall_contains_cell},
     pathfinding::recompute_building_distances,
+    worker_distance::build_worker_distances,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Simulator {
     map: CellMap,
     factory: BuildingFactory,
@@ -21,6 +22,7 @@ pub struct Simulator {
     walls: Vec<WallSegment>,
     next_wall_id: u32,
     distances: HashMap<DistanceKey, BuildingDistance>,
+    worker_distances: HashMap<DistanceKey, BuildingDistance>,
 }
 
 #[derive(Debug)]
@@ -81,6 +83,7 @@ impl Simulator {
             walls: Vec::new(),
             next_wall_id: 1,
             distances: HashMap::new(),
+            worker_distances: HashMap::new(),
         })
     }
 
@@ -104,12 +107,25 @@ impl Simulator {
         &self.distances
     }
 
+    pub fn worker_distances(&self) -> &HashMap<DistanceKey, BuildingDistance> {
+        &self.worker_distances
+    }
+
     pub fn distance_between(
         &self,
         start_building_id: u32,
         finish_building_id: u32,
     ) -> Option<&BuildingDistance> {
         self.distances
+            .get(&DistanceKey::new(start_building_id, finish_building_id))
+    }
+
+    pub fn worker_distance_between(
+        &self,
+        start_building_id: u32,
+        finish_building_id: u32,
+    ) -> Option<&BuildingDistance> {
+        self.worker_distances
             .get(&DistanceKey::new(start_building_id, finish_building_id))
     }
 
@@ -241,6 +257,11 @@ impl Simulator {
         self.time.advance(delta_ticks);
     }
 
+    pub fn calculate_worker_distances(&mut self) -> usize {
+        self.worker_distances = build_worker_distances(&self.buildings, &self.distances);
+        self.worker_distances.len()
+    }
+
     pub fn set_stockpile_resource_at(
         &mut self,
         x: usize,
@@ -271,6 +292,7 @@ impl Simulator {
             .find(|building| building.id == target_id)
             .expect("target stockpile should still exist");
         target.stockpile_resource = Some(resource);
+        self.recompute_worker_distances();
 
         Ok(target_id)
     }
@@ -385,6 +407,11 @@ impl Simulator {
 
     fn recompute_distances(&mut self) {
         self.distances = recompute_building_distances(&self.buildings, &self.map);
+        self.recompute_worker_distances();
+    }
+
+    fn recompute_worker_distances(&mut self) {
+        self.worker_distances = build_worker_distances(&self.buildings, &self.distances);
     }
 }
 
@@ -787,5 +814,97 @@ mod tests {
             result,
             Err(SimulatorError::StockpileDesignationRequiresStockpile)
         ));
+    }
+
+    #[test]
+    fn calculates_worker_distances_for_wood_workshop_and_armoury_routes() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(2, 2, StockpileResource::Wood)
+            .expect("wood stockpile should be marked");
+        let workshop_id = simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 2)
+            .expect("fletchers workshop should be placed");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+        let wood_stockpile_id = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.stockpile_resource == Some(StockpileResource::Wood))
+            .expect("wood stockpile should exist")
+            .id;
+
+        let count = simulator.calculate_worker_distances();
+        assert_eq!(count, 5);
+        assert!(
+            simulator
+                .worker_distance_between(workshop_id, wood_stockpile_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(wood_stockpile_id, workshop_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(workshop_id, armoury_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(armoury_id, workshop_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(armoury_id, wood_stockpile_id)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn calculates_worker_distances_for_iron_routes() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(2, 2, StockpileResource::Iron)
+            .expect("iron stockpile should be marked");
+        let workshop_id = simulator
+            .place_building(BuildingType::BlacksmithsWorkshop, 10, 2)
+            .expect("blacksmiths workshop should be placed");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+        let iron_stockpile_id = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.stockpile_resource == Some(StockpileResource::Iron))
+            .expect("iron stockpile should exist")
+            .id;
+
+        simulator.calculate_worker_distances();
+
+        assert!(
+            simulator
+                .worker_distance_between(workshop_id, iron_stockpile_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(iron_stockpile_id, workshop_id)
+                .is_some()
+        );
+        assert!(
+            simulator
+                .worker_distance_between(armoury_id, iron_stockpile_id)
+                .is_some()
+        );
     }
 }

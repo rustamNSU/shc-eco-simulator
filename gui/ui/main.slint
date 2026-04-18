@@ -168,6 +168,7 @@ export component MainWindow inherits Window {
     callback clear-selection();
     callback adjust-zoom(float);
     callback remove-all-walls();
+    callback calculate-worker-distances();
 
     private property <length> cell-px: 10px * root.zoom;
     private property <length> map-px: root.map-size * root.cell-px;
@@ -200,7 +201,7 @@ export component MainWindow inherits Window {
                 border-color: #d9d9d9;
                 border-radius: 6px;
                 background: #fafafa;
-                min-height: 270px;
+                min-height: 324px;
 
                 VerticalBox {
                     padding: 8px;
@@ -215,6 +216,12 @@ export component MainWindow inherits Window {
                         text: "Remove All Walls";
                         horizontal-stretch: 1;
                         clicked => { root.remove-all-walls(); }
+                    }
+
+                    Button {
+                        text: "Calculate Worker Distances";
+                        horizontal-stretch: 1;
+                        clicked => { root.calculate-worker-distances(); }
                     }
 
                     Button {

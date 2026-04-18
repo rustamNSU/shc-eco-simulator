@@ -1,6 +1,6 @@
+use crate::backend::BackendCommand;
 use simulator::{
-    BuildingType, DEFAULT_MAP_SIZE, Footprint, RemoveOutcome, Simulator, StockpileResource,
-    walls::line_cells,
+    BuildingType, DEFAULT_MAP_SIZE, Footprint, Simulator, StockpileResource, walls::line_cells,
 };
 
 enum SelectedTool {
@@ -12,31 +12,8 @@ enum SelectedTool {
 }
 
 pub enum PlacementOutcome {
-    Building {
-        id: u32,
-        name: &'static str,
-    },
-    WallStart {
-        x: i32,
-        y: i32,
-    },
-    WallPlaced {
-        id: u32,
-        start: (i32, i32),
-        end: (i32, i32),
-    },
-    RemovedBuildings {
-        removed_ids: Vec<u32>,
-        goods_yard_group_id: Option<u32>,
-    },
-    RemovedWall {
-        id: u32,
-    },
-    StockpileMarked {
-        id: u32,
-        resource: StockpileResource,
-    },
-    NothingToRemove,
+    BackendCommand(BackendCommand),
+    Status(String),
 }
 
 pub struct EditorState {
@@ -58,6 +35,10 @@ impl EditorState {
 
     pub fn map_size(&self) -> usize {
         self.simulator.map_size()
+    }
+
+    pub fn set_simulator(&mut self, simulator: Simulator) {
+        self.simulator = simulator;
     }
 
     pub fn selected_id(&self) -> Option<&'static str> {
@@ -148,18 +129,20 @@ impl EditorState {
         }
 
         match self.selected {
-            Some(SelectedTool::Building(building_type)) => {
-                let id = self
-                    .simulator
-                    .place_building(building_type, ux, uy)
-                    .map_err(|error| error.to_string())?;
-                Ok(PlacementOutcome::Building {
-                    id,
-                    name: building_type.display_name(),
-                })
-            }
+            Some(SelectedTool::Building(building_type)) => Ok(PlacementOutcome::BackendCommand(
+                BackendCommand::PlaceBuilding {
+                    building_type,
+                    x: ux,
+                    y: uy,
+                },
+            )),
             Some(SelectedTool::Wall) => self.place_wall_click(x, y),
-            Some(SelectedTool::Remove) => Ok(self.remove_at(ux, uy)),
+            Some(SelectedTool::Remove) => {
+                Ok(PlacementOutcome::BackendCommand(BackendCommand::RemoveAt {
+                    x: ux,
+                    y: uy,
+                }))
+            }
             Some(SelectedTool::SetWoodStock) => {
                 self.mark_stockpile(ux, uy, StockpileResource::Wood)
             }
@@ -170,16 +153,14 @@ impl EditorState {
         }
     }
 
-    pub fn remove_all_walls(&mut self) -> usize {
-        self.wall_start = None;
-        self.simulator.remove_all_walls()
-    }
-
     fn place_wall_click(&mut self, x: i32, y: i32) -> Result<PlacementOutcome, String> {
         match self.wall_start {
             None => {
                 self.wall_start = Some((x, y));
-                Ok(PlacementOutcome::WallStart { x, y })
+                Ok(PlacementOutcome::Status(format!(
+                    "Wall start set at ({}, {})",
+                    x, y
+                )))
             }
             Some((sx, sy)) => {
                 if sx != x && sy != y {
@@ -188,16 +169,13 @@ impl EditorState {
                     );
                 }
 
-                let wall_id = self
-                    .simulator
-                    .place_wall(sx as usize, sy as usize, x as usize, y as usize)
-                    .map_err(|error| error.to_string())?;
                 self.wall_start = None;
-                Ok(PlacementOutcome::WallPlaced {
-                    id: wall_id,
-                    start: (sx, sy),
-                    end: (x, y),
-                })
+                Ok(PlacementOutcome::BackendCommand(
+                    BackendCommand::PlaceWall {
+                        start: (sx as usize, sy as usize),
+                        end: (x as usize, y as usize),
+                    },
+                ))
             }
         }
     }
@@ -206,19 +184,8 @@ impl EditorState {
         &self.simulator
     }
 
-    fn remove_at(&mut self, x: usize, y: usize) -> PlacementOutcome {
+    pub fn clear_pending_wall(&mut self) {
         self.wall_start = None;
-        match self.simulator.remove_at(x, y) {
-            RemoveOutcome::None => PlacementOutcome::NothingToRemove,
-            RemoveOutcome::Wall { id } => PlacementOutcome::RemovedWall { id },
-            RemoveOutcome::Buildings {
-                removed_ids,
-                goods_yard_group_id,
-            } => PlacementOutcome::RemovedBuildings {
-                removed_ids,
-                goods_yard_group_id,
-            },
-        }
     }
 
     fn mark_stockpile(
@@ -228,11 +195,9 @@ impl EditorState {
         resource: StockpileResource,
     ) -> Result<PlacementOutcome, String> {
         self.wall_start = None;
-        let id = self
-            .simulator
-            .set_stockpile_resource_at(x, y, resource)
-            .map_err(|error| error.to_string())?;
-        Ok(PlacementOutcome::StockpileMarked { id, resource })
+        Ok(PlacementOutcome::BackendCommand(
+            BackendCommand::SetStockpileResource { x, y, resource },
+        ))
     }
 
     pub fn preview_cells(&self) -> Vec<(i32, i32)> {
