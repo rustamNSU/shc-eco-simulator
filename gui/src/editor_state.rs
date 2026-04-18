@@ -1,11 +1,14 @@
 use simulator::{
-    BuildingType, DEFAULT_MAP_SIZE, Footprint, RemoveOutcome, Simulator, walls::line_cells,
+    BuildingType, DEFAULT_MAP_SIZE, Footprint, RemoveOutcome, Simulator, StockpileResource,
+    walls::line_cells,
 };
 
 enum SelectedTool {
     Building(BuildingType),
     Wall,
     Remove,
+    SetWoodStock,
+    SetIronStock,
 }
 
 pub enum PlacementOutcome {
@@ -28,6 +31,10 @@ pub enum PlacementOutcome {
     },
     RemovedWall {
         id: u32,
+    },
+    StockpileMarked {
+        id: u32,
+        resource: StockpileResource,
     },
     NothingToRemove,
 }
@@ -58,6 +65,8 @@ impl EditorState {
             Some(SelectedTool::Building(building_type)) => Some(building_type.id()),
             Some(SelectedTool::Wall) => Some("wall"),
             Some(SelectedTool::Remove) => Some("remove"),
+            Some(SelectedTool::SetWoodStock) => Some("set_wood_stock"),
+            Some(SelectedTool::SetIronStock) => Some("set_iron_stock"),
             None => None,
         }
     }
@@ -72,6 +81,16 @@ impl EditorState {
 
         if value == "remove" {
             self.selected = Some(SelectedTool::Remove);
+            return true;
+        }
+
+        if value == "set_wood_stock" {
+            self.selected = Some(SelectedTool::SetWoodStock);
+            return true;
+        }
+
+        if value == "set_iron_stock" {
+            self.selected = Some(SelectedTool::SetIronStock);
             return true;
         }
 
@@ -91,6 +110,8 @@ impl EditorState {
             Some(SelectedTool::Building(building_type)) => building_type.display_name(),
             Some(SelectedTool::Wall) => "Wall",
             Some(SelectedTool::Remove) => "Remove",
+            Some(SelectedTool::SetWoodStock) => "Set Wood Stock",
+            Some(SelectedTool::SetIronStock) => "Set Iron Stock",
             None => "None",
         }
     }
@@ -139,6 +160,12 @@ impl EditorState {
             }
             Some(SelectedTool::Wall) => self.place_wall_click(x, y),
             Some(SelectedTool::Remove) => Ok(self.remove_at(ux, uy)),
+            Some(SelectedTool::SetWoodStock) => {
+                self.mark_stockpile(ux, uy, StockpileResource::Wood)
+            }
+            Some(SelectedTool::SetIronStock) => {
+                self.mark_stockpile(ux, uy, StockpileResource::Iron)
+            }
             None => Err("no tool selected".to_string()),
         }
     }
@@ -194,6 +221,20 @@ impl EditorState {
         }
     }
 
+    fn mark_stockpile(
+        &mut self,
+        x: usize,
+        y: usize,
+        resource: StockpileResource,
+    ) -> Result<PlacementOutcome, String> {
+        self.wall_start = None;
+        let id = self
+            .simulator
+            .set_stockpile_resource_at(x, y, resource)
+            .map_err(|error| error.to_string())?;
+        Ok(PlacementOutcome::StockpileMarked { id, resource })
+    }
+
     pub fn preview_cells(&self) -> Vec<(i32, i32)> {
         let Some((anchor_x, anchor_y)) = self.hover_cell else {
             return Vec::new();
@@ -232,7 +273,9 @@ impl EditorState {
                 }
                 vec![(anchor_x, anchor_y)]
             }
-            Some(SelectedTool::Remove) => vec![(anchor_x, anchor_y)],
+            Some(SelectedTool::Remove)
+            | Some(SelectedTool::SetWoodStock)
+            | Some(SelectedTool::SetIronStock) => vec![(anchor_x, anchor_y)],
             None => Vec::new(),
         }
     }

@@ -1,12 +1,16 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    buildings::{BuildingFactory, BuildingPlacement, BuildingType, EntryPoint},
+    buildings::{BuildingFactory, BuildingPlacement, BuildingType, StockpileResource},
     map::{CellMap, MapError},
     walls::{WallSegment, line_cells},
 };
 
-use super::{BuildingDistance, DistanceKey, GameTime};
+use super::{
+    BuildingDistance, DistanceKey, GameTime,
+    entry_logic::{calculate_building_entry, resolve_entry_point_for_square, wall_contains_cell},
+    pathfinding::recompute_building_distances,
+};
 
 #[derive(Debug)]
 pub struct Simulator {
@@ -24,6 +28,7 @@ pub enum SimulatorError {
     Map(MapError),
     InvalidMapSize,
     InvalidWallDirection,
+    StockpileDesignationRequiresStockpile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +49,12 @@ impl core::fmt::Display for SimulatorError {
             Self::Map(error) => write!(f, "{error}"),
             Self::InvalidMapSize => write!(f, "map size must be greater than zero"),
             Self::InvalidWallDirection => write!(f, "wall must be horizontal or vertical"),
+            Self::StockpileDesignationRequiresStockpile => {
+                write!(
+                    f,
+                    "stockpile designation can only be applied to a stockpile"
+                )
+            }
         }
     }
 }
@@ -230,8 +241,44 @@ impl Simulator {
         self.time.advance(delta_ticks);
     }
 
+    pub fn set_stockpile_resource_at(
+        &mut self,
+        x: usize,
+        y: usize,
+        resource: StockpileResource,
+    ) -> Result<u32, SimulatorError> {
+        let Some(target_id) = self
+            .buildings
+            .iter()
+            .find(|building| {
+                building.building_type == BuildingType::Stockpile
+                    && building.occupied_cells().any(|cell| cell == (x, y))
+            })
+            .map(|building| building.id)
+        else {
+            return Err(SimulatorError::StockpileDesignationRequiresStockpile);
+        };
+
+        for building in &mut self.buildings {
+            if building.stockpile_resource == Some(resource) {
+                building.stockpile_resource = None;
+            }
+        }
+
+        let target = self
+            .buildings
+            .iter_mut()
+            .find(|building| building.id == target_id)
+            .expect("target stockpile should still exist");
+        target.stockpile_resource = Some(resource);
+
+        Ok(target_id)
+    }
+
     fn assign_entry_points(&self, placement: &mut BuildingPlacement) {
-        placement.entry_point = self.calculate_building_entry(
+        placement.entry_point = calculate_building_entry(
+            &self.map,
+            &self.walls,
             placement.building_type,
             placement.x,
             placement.y,
@@ -239,8 +286,13 @@ impl Simulator {
         );
 
         for component in &mut placement.components {
-            component.entry_point =
-                self.resolve_entry_point_for_square(component.x, component.y, component.size, 0);
+            component.entry_point = resolve_entry_point_for_square(
+                &self.map,
+                component.x,
+                component.y,
+                component.size,
+                0,
+            );
         }
     }
 
@@ -248,7 +300,9 @@ impl Simulator {
         for index in 0..self.buildings.len() {
             let (building_entry, component_entries) = {
                 let building = &self.buildings[index];
-                let building_entry = self.calculate_building_entry(
+                let building_entry = calculate_building_entry(
+                    &self.map,
+                    &self.walls,
                     building.building_type,
                     building.x,
                     building.y,
@@ -258,7 +312,8 @@ impl Simulator {
                     .components()
                     .iter()
                     .map(|component| {
-                        self.resolve_entry_point_for_square(
+                        resolve_entry_point_for_square(
+                            &self.map,
                             component.x,
                             component.y,
                             component.size,
@@ -279,26 +334,6 @@ impl Simulator {
                 component.entry_point = new_entry;
             }
         }
-    }
-
-    fn calculate_building_entry(
-        &self,
-        building_type: BuildingType,
-        x: usize,
-        y: usize,
-        size: usize,
-    ) -> Option<EntryPoint> {
-        if building_type == BuildingType::GoodsYard {
-            return None;
-        }
-
-        let rotation_steps = if is_workshop(building_type) {
-            self.workshop_wall_rotation_steps(x, y, size)
-        } else {
-            0
-        };
-
-        self.resolve_entry_point_for_square(x, y, size, rotation_steps)
     }
 
     fn remove_buildings_by_group(&mut self, group_id: u32) -> Vec<u32> {
@@ -349,287 +384,13 @@ impl Simulator {
     }
 
     fn recompute_distances(&mut self) {
-        let mut map = HashMap::new();
-
-        for start in &self.buildings {
-            for finish in &self.buildings {
-                if start.id == finish.id {
-                    continue;
-                }
-
-                let key = DistanceKey::new(start.id, finish.id);
-                let distance_cells = match (start.entry_point, finish.entry_point) {
-                    (Some(start_entry), Some(finish_entry)) => {
-                        self.shortest_path_len(start_entry, finish_entry)
-                    }
-                    _ => None,
-                };
-
-                map.insert(
-                    key,
-                    BuildingDistance {
-                        key,
-                        start_entry: start.entry_point,
-                        finish_entry: finish.entry_point,
-                        distance_cells,
-                    },
-                );
-            }
-        }
-
-        self.distances = map;
+        self.distances = recompute_building_distances(&self.buildings, &self.map);
     }
-
-    fn shortest_path_len(&self, start: EntryPoint, finish: EntryPoint) -> Option<u32> {
-        if !self.map.is_in_bounds(start.x, start.y) || !self.map.is_in_bounds(finish.x, finish.y) {
-            return None;
-        }
-
-        if start == finish {
-            return Some(0);
-        }
-
-        if self.map.is_occupied(start.x, start.y) || self.map.is_occupied(finish.x, finish.y) {
-            return None;
-        }
-
-        let size = self.map.size();
-        let mut dist = vec![u32::MAX; size * size];
-        let mut queue = VecDeque::new();
-
-        let start_idx = start.y * size + start.x;
-        dist[start_idx] = 0;
-        queue.push_back((start.x, start.y));
-
-        while let Some((x, y)) = queue.pop_front() {
-            let current_dist = dist[y * size + x];
-
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-                    if nx < 0 || ny < 0 {
-                        continue;
-                    }
-                    let ux = nx as usize;
-                    let uy = ny as usize;
-                    if !self.map.is_in_bounds(ux, uy) {
-                        continue;
-                    }
-                    if self.map.is_occupied(ux, uy) {
-                        continue;
-                    }
-
-                    let next_idx = uy * size + ux;
-                    if dist[next_idx] != u32::MAX {
-                        continue;
-                    }
-
-                    let next_dist = current_dist + 1;
-                    if ux == finish.x && uy == finish.y {
-                        return Some(next_dist);
-                    }
-
-                    dist[next_idx] = next_dist;
-                    queue.push_back((ux, uy));
-                }
-            }
-        }
-
-        None
-    }
-
-    fn resolve_entry_point_for_square(
-        &self,
-        x: usize,
-        y: usize,
-        size: usize,
-        rotation_steps: usize,
-    ) -> Option<EntryPoint> {
-        let default_cell = default_entry_cell_rotated(x, y, size, rotation_steps);
-        let side_cells = side_perimeter_cells_clockwise(x, y, size, default_cell);
-        if let Some(point) = self.first_available(side_cells) {
-            return Some(point);
-        }
-
-        let corner_cells = corner_cells_clockwise_from_bottom_right(x, y, size, rotation_steps);
-        self.first_available(corner_cells)
-    }
-
-    fn first_available(&self, cells: Vec<(i32, i32)>) -> Option<EntryPoint> {
-        for (cx, cy) in cells {
-            if cx < 0 || cy < 0 {
-                continue;
-            }
-            let ux = cx as usize;
-            let uy = cy as usize;
-            if self.map.is_in_bounds(ux, uy) && !self.map.is_occupied(ux, uy) {
-                return Some(EntryPoint { x: ux, y: uy });
-            }
-        }
-        None
-    }
-
-    fn workshop_wall_rotation_steps(&self, x: usize, y: usize, size: usize) -> usize {
-        let xi = x as i32;
-        let yi = y as i32;
-        let ni = size as i32;
-
-        if self.side_has_wall_contact((xi..(xi + ni)).map(|cx| (cx, yi + ni)).collect()) {
-            return 0;
-        }
-        if self.side_has_wall_contact((yi..(yi + ni)).map(|cy| (xi + ni, cy)).collect()) {
-            return 1;
-        }
-        if self.side_has_wall_contact((xi..(xi + ni)).map(|cx| (cx, yi - 1)).collect()) {
-            return 2;
-        }
-        if self.side_has_wall_contact((yi..(yi + ni)).map(|cy| (xi - 1, cy)).collect()) {
-            return 3;
-        }
-
-        0
-    }
-
-    fn side_has_wall_contact(&self, cells: Vec<(i32, i32)>) -> bool {
-        cells.into_iter().any(|(x, y)| self.is_wall_at(x, y))
-    }
-
-    fn is_wall_at(&self, x: i32, y: i32) -> bool {
-        if x < 0 || y < 0 {
-            return false;
-        }
-        let ux = x as usize;
-        let uy = y as usize;
-        self.walls
-            .iter()
-            .any(|wall| wall_contains_cell(wall, ux, uy))
-    }
-}
-
-fn default_entry_cell_rotated(
-    x: usize,
-    y: usize,
-    size: usize,
-    rotation_steps: usize,
-) -> Option<(i32, i32)> {
-    if y == 0 || size == 0 {
-        return None;
-    }
-
-    let offset = if size == 2 { 0 } else { (size / 2) as i32 };
-    let xi = x as i32;
-    let yi = y as i32;
-    let ni = size as i32;
-
-    match rotation_steps % 4 {
-        0 => Some((xi + offset, yi - 1)),
-        1 => Some((xi - 1, yi + offset)),
-        2 => Some((xi + offset, yi + ni)),
-        _ => Some((xi + ni, yi + offset)),
-    }
-}
-
-fn side_perimeter_cells_clockwise(
-    x: usize,
-    y: usize,
-    size: usize,
-    start: Option<(i32, i32)>,
-) -> Vec<(i32, i32)> {
-    if size == 0 {
-        return Vec::new();
-    }
-
-    let xi = x as i32;
-    let yi = y as i32;
-    let ni = size as i32;
-    let top = yi + ni;
-    let right = xi + ni;
-
-    let mut ring = Vec::with_capacity(size * 4);
-
-    for cx in (xi..(xi + ni)).rev() {
-        ring.push((cx, yi - 1));
-    }
-    for cy in yi..(yi + ni) {
-        ring.push((xi - 1, cy));
-    }
-    for cx in xi..(xi + ni) {
-        ring.push((cx, top));
-    }
-    for cy in (yi..(yi + ni)).rev() {
-        ring.push((right, cy));
-    }
-
-    if let Some(start_cell) = start {
-        if let Some(idx) = ring.iter().position(|cell| *cell == start_cell) {
-            ring.rotate_left(idx);
-        }
-    }
-
-    ring
-}
-
-fn corner_cells_clockwise_from_bottom_right(
-    x: usize,
-    y: usize,
-    size: usize,
-    rotation_steps: usize,
-) -> Vec<(i32, i32)> {
-    let xi = x as i32;
-    let yi = y as i32;
-    let ni = size as i32;
-
-    let mut corners = vec![
-        (xi + ni, yi - 1),
-        (xi - 1, yi - 1),
-        (xi - 1, yi + ni),
-        (xi + ni, yi + ni),
-    ];
-
-    corners.rotate_left(rotation_steps % 4);
-    corners
-}
-
-fn wall_contains_cell(wall: &WallSegment, x: usize, y: usize) -> bool {
-    if wall.start_x == wall.end_x {
-        if x != wall.start_x {
-            return false;
-        }
-        let min_y = wall.start_y.min(wall.end_y);
-        let max_y = wall.start_y.max(wall.end_y);
-        return y >= min_y && y <= max_y;
-    }
-
-    if wall.start_y == wall.end_y {
-        if y != wall.start_y {
-            return false;
-        }
-        let min_x = wall.start_x.min(wall.end_x);
-        let max_x = wall.start_x.max(wall.end_x);
-        return x >= min_x && x <= max_x;
-    }
-
-    false
-}
-
-fn is_workshop(building_type: BuildingType) -> bool {
-    matches!(
-        building_type,
-        BuildingType::FletchersWorkshop
-            | BuildingType::BlacksmithsWorkshop
-            | BuildingType::PoleturnersWorkshop
-            | BuildingType::ArmourersWorkshop
-    )
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::buildings::{BuildingType, EntryPoint};
+    use crate::buildings::{BuildingType, EntryPoint, StockpileResource};
 
     use super::{DistanceKey, RemoveOutcome, Simulator, SimulatorError};
 
@@ -828,13 +589,6 @@ mod tests {
     }
 
     #[test]
-    fn same_start_and_finish_cell_has_zero_distance() {
-        let simulator = Simulator::new(10).expect("simulator should be created");
-        let point = EntryPoint { x: 1, y: 1 };
-        assert_eq!(simulator.shortest_path_len(point, point), Some(0));
-    }
-
-    #[test]
     fn wall_can_make_distance_unreachable() {
         let mut simulator = Simulator::new(20).expect("simulator should be created");
         let start_id = simulator
@@ -959,5 +713,79 @@ mod tests {
             .expect("target should exist")
             .entry_point;
         assert_eq!(after, Some(EntryPoint { x: 7, y: 5 }));
+    }
+
+    #[test]
+    fn stockpile_resource_moves_between_stockpiles() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 10, 10)
+            .expect("goods yard should be placed");
+
+        let first_id = simulator
+            .set_stockpile_resource_at(10, 10, StockpileResource::Wood)
+            .expect("first stockpile should accept wood");
+        let second_id = simulator
+            .set_stockpile_resource_at(13, 10, StockpileResource::Wood)
+            .expect("second stockpile should accept wood");
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(
+            simulator
+                .buildings()
+                .iter()
+                .find(|b| b.id == first_id)
+                .expect("first stockpile should exist")
+                .stockpile_resource,
+            None
+        );
+        assert_eq!(
+            simulator
+                .buildings()
+                .iter()
+                .find(|b| b.id == second_id)
+                .expect("second stockpile should exist")
+                .stockpile_resource,
+            Some(StockpileResource::Wood)
+        );
+    }
+
+    #[test]
+    fn stockpile_cannot_hold_wood_and_iron_together() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 10, 10)
+            .expect("goods yard should be placed");
+
+        let stockpile_id = simulator
+            .set_stockpile_resource_at(10, 10, StockpileResource::Wood)
+            .expect("stockpile should accept wood");
+        simulator
+            .set_stockpile_resource_at(10, 10, StockpileResource::Iron)
+            .expect("stockpile should switch to iron");
+
+        assert_eq!(
+            simulator
+                .buildings()
+                .iter()
+                .find(|b| b.id == stockpile_id)
+                .expect("stockpile should exist")
+                .stockpile_resource,
+            Some(StockpileResource::Iron)
+        );
+    }
+
+    #[test]
+    fn stockpile_designation_rejects_non_stockpile_cells() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Armoury, 5, 5)
+            .expect("armoury should be placed");
+
+        let result = simulator.set_stockpile_resource_at(5, 5, StockpileResource::Wood);
+        assert!(matches!(
+            result,
+            Err(SimulatorError::StockpileDesignationRequiresStockpile)
+        ));
     }
 }

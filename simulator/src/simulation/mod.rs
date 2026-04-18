@@ -1,5 +1,7 @@
 mod distance;
+mod entry_logic;
 mod game_time;
+mod pathfinding;
 mod simulator;
 
 pub use distance::{BuildingDistance, DistanceKey};

@@ -65,6 +65,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Ok(PlacementOutcome::RemovedWall { id }) => format!("Removed Wall #{}", id),
+                Ok(PlacementOutcome::StockpileMarked { id, resource }) => {
+                    format!("Marked stockpile #{} as {}", id, resource.display_name())
+                }
                 Ok(PlacementOutcome::NothingToRemove) => {
                     "Nothing to remove at this cell".to_string()
                 }
@@ -90,7 +93,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(window) = weak_window.upgrade() {
             let mut state = state_for_hover.borrow_mut();
             state.set_hover_cell(x, y);
-            refresh_view(&window, &state, &window.get_status_text().to_string());
+            refresh_preview(&window, &state);
         }
     });
 
@@ -123,18 +126,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
+    window.set_status_text(status.into());
+    refresh_static_view(window, state);
+    refresh_preview(window, state);
+}
+
+fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     let map_size = state.map_size() as i32;
     window.set_map_size(map_size);
     window.set_selected_building(state.selected_id().unwrap_or_default().into());
-    window.set_status_text(status.into());
 
     let cells = visuals::build_occupied_cells(state.simulator());
     let model = VecModel::from(cells);
     window.set_occupied_cells(ModelRc::new(model));
-
-    let preview_cells = visuals::build_preview_cells(&state.preview_cells());
-    let preview_model = VecModel::from(preview_cells);
-    window.set_preview_cells(ModelRc::new(preview_model));
 
     let list_entries = visuals::build_building_list(state.simulator());
     let list_model = VecModel::from(list_entries);
@@ -151,4 +155,14 @@ fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     let no_entry_cells = visuals::build_no_entry_markers(state.simulator());
     let no_entry_model = VecModel::from(no_entry_cells);
     window.set_no_entry_cells(ModelRc::new(no_entry_model));
+
+    let resource_labels = visuals::build_stockpile_resource_labels(state.simulator());
+    let resource_model = VecModel::from(resource_labels);
+    window.set_resource_labels(ModelRc::new(resource_model));
+}
+
+fn refresh_preview(window: &MainWindow, state: &EditorState) {
+    let preview_cells = visuals::build_preview_cells(&state.preview_cells());
+    let preview_model = VecModel::from(preview_cells);
+    window.set_preview_cells(ModelRc::new(preview_model));
 }

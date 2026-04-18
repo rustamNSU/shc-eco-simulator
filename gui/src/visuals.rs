@@ -1,4 +1,4 @@
-use simulator::{BuildingType, Simulator};
+use simulator::{BuildingType, Simulator, StockpileResource};
 
 use crate::{BuildingListItem, MapMarker, OccupiedCellVisual};
 
@@ -63,7 +63,7 @@ pub fn build_building_list(simulator: &Simulator) -> Vec<BuildingListItem> {
     for building in simulator.buildings() {
         result.push(BuildingListItem {
             id: building.id as i32,
-            name: building.building_type.display_name().into(),
+            name: building_list_name(building).into(),
             x: building.x as i32,
             y: building.y as i32,
             color: building_color(building.building_type),
@@ -120,6 +120,26 @@ pub fn build_entry_labels(simulator: &Simulator) -> Vec<MapMarker> {
     result
 }
 
+pub fn build_stockpile_resource_labels(simulator: &Simulator) -> Vec<MapMarker> {
+    let mut result = Vec::new();
+
+    for building in simulator.buildings() {
+        let Some(resource) = building.stockpile_resource else {
+            continue;
+        };
+
+        result.push(MapMarker {
+            x: (building.x + 1) as i32,
+            y: (building.y + 1) as i32,
+            text: resource.short_label().into(),
+            color: slint::Color::from_rgb_u8(20, 20, 20),
+            bg: stockpile_resource_color(resource),
+        });
+    }
+
+    result
+}
+
 pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
     let mut result = Vec::new();
     let red = slint::Color::from_rgb_u8(220, 40, 40);
@@ -152,6 +172,26 @@ pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> 
     }
 
     result
+}
+
+fn building_list_name(building: &simulator::BuildingPlacement) -> String {
+    match building.stockpile_resource {
+        Some(resource) => {
+            format!(
+                "{} [{}]",
+                building.building_type.display_name(),
+                resource.display_name()
+            )
+        }
+        None => building.building_type.display_name().to_string(),
+    }
+}
+
+fn stockpile_resource_color(resource: StockpileResource) -> slint::Color {
+    match resource {
+        StockpileResource::Wood => slint::Color::from_argb_u8(210, 196, 150, 92),
+        StockpileResource::Iron => slint::Color::from_argb_u8(210, 170, 170, 178),
+    }
 }
 
 fn append_diagonal_cells(

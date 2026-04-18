@@ -75,6 +75,10 @@ component ToolButton inherits Rectangle {
     in property <string> tool-id;
     in property <string> selected-id;
     in property <color> map-color;
+    in property <image> icon;
+    in property <bool> use-icon: false;
+    in property <bool> show-color-mark: true;
+    in property <bool> show-line-icon: true;
     callback selected(string);
 
     min-height: 56px;
@@ -94,6 +98,7 @@ component ToolButton inherits Rectangle {
             border-color: #666666;
             border-radius: 4px;
             background: #ffffff;
+            visible: !root.use-icon;
 
             Rectangle {
                 x: 6px;
@@ -101,7 +106,16 @@ component ToolButton inherits Rectangle {
                 width: 40px;
                 height: 2px;
                 background: root.map-color;
+                visible: root.show-line-icon;
             }
+        }
+
+        Image {
+            width: 52px;
+            height: 28px;
+            source: root.icon;
+            image-fit: contain;
+            visible: root.use-icon;
         }
 
         Text {
@@ -117,6 +131,7 @@ component ToolButton inherits Rectangle {
             border-color: #666666;
             border-radius: 3px;
             background: root.map-color;
+            visible: root.show-color-mark;
         }
     }
 
@@ -144,6 +159,7 @@ export component MainWindow inherits Window {
     in property <[BuildingListItem]> placed-buildings;
     in property <[MapMarker]> anchor-labels;
     in property <[MapMarker]> entry-labels;
+    in property <[MapMarker]> resource-labels;
     in-out property <bool> show-entry-points: true;
 
     callback place-at(float, float);
@@ -184,7 +200,7 @@ export component MainWindow inherits Window {
                 border-color: #d9d9d9;
                 border-radius: 6px;
                 background: #fafafa;
-                min-height: 82px;
+                min-height: 270px;
 
                 VerticalBox {
                     padding: 8px;
@@ -199,6 +215,33 @@ export component MainWindow inherits Window {
                         text: "Remove All Walls";
                         horizontal-stretch: 1;
                         clicked => { root.remove-all-walls(); }
+                    }
+
+                    Button {
+                        text: "Remove";
+                        clicked => { root.select-building("remove"); }
+                    }
+
+                    ToolButton {
+                        title: "Wood Stock";
+                        tool-id: "set_wood_stock";
+                        selected-id: root.selected-building;
+                        map-color: #c4965c;
+                        icon: @image-url("../assets/wood.png");
+                        use-icon: true;
+                        show-color-mark: false;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    ToolButton {
+                        title: "Iron Stock";
+                        tool-id: "set_iron_stock";
+                        selected-id: root.selected-building;
+                        map-color: #aaaab2;
+                        icon: @image-url("../assets/iron.png");
+                        use-icon: true;
+                        show-color-mark: false;
+                        selected(id) => { root.select-building(id); }
                     }
                 }
             }
@@ -279,13 +322,6 @@ export component MainWindow inherits Window {
                         selected(id) => { root.select-building(id); }
                     }
 
-                    ToolButton {
-                        title: "Remove";
-                        tool-id: "remove";
-                        selected-id: root.selected-building;
-                        map-color: #d9534f;
-                        selected(id) => { root.select-building(id); }
-                    }
                 }
             }
         }
@@ -395,6 +431,22 @@ export component MainWindow inherits Window {
                             height: max(1px, root.cell-px - 1px);
                             background: label.bg;
                             visible: root.show-entry-points;
+
+                            Text {
+                                x: 1px;
+                                y: max(0px, root.cell-px - 11px);
+                                text: label.text;
+                                color: label.color;
+                                font-size: 10px;
+                            }
+                        }
+
+                        for label in root.resource-labels: Rectangle {
+                            x: label.x * root.cell-px;
+                            y: (root.map-size - label.y - 1) * root.cell-px;
+                            width: max(1px, root.cell-px - 1px);
+                            height: max(1px, root.cell-px - 1px);
+                            background: label.bg;
 
                             Text {
                                 x: 1px;

@@ -1,4 +1,4 @@
-use super::{BuildingComponent, BuildingType, EntryPoint, Footprint};
+use super::{BuildingComponent, BuildingType, EntryPoint, Footprint, StockpileResource};
 
 #[derive(Debug, Clone)]
 pub struct BuildingPlacement {
@@ -7,6 +7,7 @@ pub struct BuildingPlacement {
     pub x: usize,
     pub y: usize,
     pub goods_yard_group_id: Option<u32>,
+    pub stockpile_resource: Option<StockpileResource>,
     pub entry_point: Option<EntryPoint>,
     pub footprint: Footprint,
     pub components: Vec<BuildingComponent>,
