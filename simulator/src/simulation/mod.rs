@@ -10,6 +10,6 @@ pub use distance::{BuildingDistance, DistanceKey};
 pub use game_time::GameTime;
 pub use production_cycle::{
     ProductionCycle, ProductionCycleError, ProductionRouteUsage, SimulationSettings, WeaponRecipe,
-    WeaponType,
+    WeaponType, clamped_fear_factor, workshop_fear_output_ring,
 };
 pub use simulator::{RemoveOutcome, Simulator, SimulatorError};

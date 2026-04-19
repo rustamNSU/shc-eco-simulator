@@ -1,7 +1,7 @@
 use crate::backend::{BackendCommand, CycleSimulationRow};
 use simulator::{
     BuildingType, DEFAULT_MAP_SIZE, Footprint, SimulationSettings, Simulator, StockpileResource,
-    WeaponType, walls::line_cells,
+    WeaponType, clamped_fear_factor, walls::line_cells,
 };
 
 enum SelectedTool {
@@ -203,6 +203,10 @@ impl EditorState {
         self.simulation_settings.game_speed_ticks_per_second
     }
 
+    pub fn fear_factor(&self) -> i32 {
+        self.simulation_settings.fear_factor
+    }
+
     pub fn optimized_fletcher_routing(&self) -> bool {
         self.simulation_settings.optimized_fletcher_routing
     }
@@ -214,6 +218,16 @@ impl EditorState {
         }
 
         self.simulation_settings.game_speed_ticks_per_second = snapped;
+        true
+    }
+
+    pub fn set_fear_factor(&mut self, value: f32) -> bool {
+        let snapped = clamped_fear_factor(value.round() as i32);
+        if self.simulation_settings.fear_factor == snapped {
+            return false;
+        }
+
+        self.simulation_settings.fear_factor = snapped;
         true
     }
 

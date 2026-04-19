@@ -11,7 +11,7 @@ pub use map::{CellMap, MapError};
 pub use simulation::{
     BuildingDistance, DistanceKey, GameTime, ProductionCycle, ProductionCycleError,
     ProductionRouteUsage, RemoveOutcome, SimulationSettings, Simulator, SimulatorError,
-    WeaponRecipe, WeaponType,
+    WeaponRecipe, WeaponType, clamped_fear_factor, workshop_fear_output_ring,
 };
 pub use walls::WallSegment;
 

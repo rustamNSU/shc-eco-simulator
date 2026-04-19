@@ -108,12 +108,12 @@ If a weapon needs `2` wood or `2` iron, that means two separate stockpile-to-wor
 
 | Weapon   | Workshop              | Wood Req | Iron Req | Make Time (Ticks) | Sell Gold |
 | -------- | --------------------- | -------- | -------- | ----------------- | --------- |
-| Bow      | Fletchers Workshop    |    2     |          |        400        |     15    |
+| Bow      | Fletchers Workshop    |    2     |          |        638        |     15    |
 | Crossbow | Fletchers Workshop    |    3     |          |        565        |     30    |
-| Spear    | Poleturners Workshop  |    1     |          |        300        |     10    |
-| Pike     | Poleturners Workshop  |    2     |          |        600        |     18    |
-| Sword    | Blacksmiths Workshop  |          |    1     |        600        |     30    |
-| Mace     | Blacksmiths Workshop  |          |    1     |        600        |     30    |
+| Spear    | Poleturners Workshop  |    1     |          |        332        |     10    |
+| Pike     | Poleturners Workshop  |    2     |          |        872        |     18    |
+| Sword    | Blacksmiths Workshop  |          |    1     |       1090        |     30    |
+| Mace     | Blacksmiths Workshop  |          |    1     |        910        |     30    |
 | Armor    | Armourers Workshop    |          |    1     |        625        |     30    |
 
 ### Production Cycle Model

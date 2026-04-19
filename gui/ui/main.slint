@@ -89,52 +89,86 @@ component SimulationToggleButton inherits Rectangle {
     in property <image> icon;
     callback pressed();
 
-    min-height: 44px;
-    max-height: 44px;
+    height: 50px;
+    horizontal-stretch: 1;
     border-width: 1px;
     border-color: #cfd6df;
     border-radius: 8px;
     background: #ffffff;
+    clip: true;
 
     Text {
         x: 12px;
-        y: 7px;
-        width: parent.width - 52px;
+        y: 8px;
+        width: parent.width - 58px;
+        height: 16px;
         text: root.title;
         font-weight: 600;
         font-size: 12px;
         color: #1f2937;
         overflow: elide;
+        vertical-alignment: center;
     }
 
     Text {
         x: 12px;
-        y: 23px;
-        width: parent.width - 52px;
+        y: 27px;
+        width: parent.width - 58px;
+        height: 14px;
         text: root.weapon-name;
         color: #6b7280;
         font-size: 10px;
         overflow: elide;
+        vertical-alignment: center;
     }
 
     Rectangle {
-        x: parent.width - 32px;
-        y: 11px;
-        width: 18px;
-        height: 18px;
+        x: parent.width - 40px;
+        y: 10px;
+        width: 30px;
+        height: 30px;
         border-width: 1px;
         border-color: #d8dde5;
         border-radius: 6px;
         background: #f8fafc;
 
         Image {
-            x: 1px;
-            y: 1px;
-            width: 16px;
-            height: 16px;
+            x: 2px;
+            y: 2px;
+            width: 26px;
+            height: 26px;
             source: root.icon;
             image-fit: contain;
         }
+    }
+
+    TouchArea {
+        clicked => {
+            root.pressed();
+        }
+    }
+}
+
+component PrimaryActionButton inherits Rectangle {
+    in property <string> title;
+    callback pressed();
+
+    min-width: 150px;
+    height: 34px;
+    border-width: 1px;
+    border-color: #1f5fa8;
+    border-radius: 6px;
+    background: #256fb8;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.title;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 
     TouchArea {
@@ -246,6 +280,7 @@ export component MainWindow inherits Window {
     in-out property <bool> show-entry-points: true;
     in-out property <bool> optimize-fletcher-routing: false;
     in-out property <int> game-speed: 50;
+    in-out property <int> fear-factor: 0;
     in-out property <string> fletchers-weapon: "bow";
     in-out property <string> poleturners-weapon: "spear";
     in-out property <string> blacksmiths-weapon: "sword";
@@ -258,6 +293,7 @@ export component MainWindow inherits Window {
     callback remove-all-walls();
     callback set-optimize-fletcher-routing(bool);
     callback set-game-speed(float);
+    callback set-fear-factor(float);
     callback run-simulation();
     callback set-simulation-tooltips-enabled(bool);
     callback toggle-fletchers-weapon();
@@ -752,16 +788,16 @@ export component MainWindow inherits Window {
                             background: transparent;
                         }
 
-                        Button {
-                            text: "Run Simulation";
-                            clicked => { root.run-simulation(); }
+                        PrimaryActionButton {
+                            title: "Calculate Average";
+                            pressed => { root.run-simulation(); }
                         }
                     }
 
                     HorizontalBox {
                         spacing: 8px;
-                        min-height: 44px;
-                        max-height: 44px;
+                        min-height: 50px;
+                        max-height: 50px;
 
                         SimulationToggleButton {
                             title: "Fletchers";
@@ -813,6 +849,35 @@ export component MainWindow inherits Window {
 
                         Text {
                             text: root.game-speed + " GS";
+                            vertical-alignment: center;
+                            min-width: 48px;
+                            horizontal-alignment: right;
+                            color: #1f2937;
+                        }
+                    }
+
+                    HorizontalBox {
+                        spacing: 10px;
+                        min-height: 28px;
+                        max-height: 28px;
+
+                        Text {
+                            text: "Fear Factor";
+                            vertical-alignment: center;
+                            min-width: 86px;
+                            color: #1f2937;
+                        }
+
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 0;
+                            maximum: 5;
+                            value: 0 - root.fear-factor;
+                            changed(value) => { root.set-fear-factor(0 - value); }
+                        }
+
+                        Text {
+                            text: root.fear-factor + " FF";
                             vertical-alignment: center;
                             min-width: 48px;
                             horizontal-alignment: right;

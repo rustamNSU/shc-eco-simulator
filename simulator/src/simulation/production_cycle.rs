@@ -3,6 +3,10 @@ use crate::buildings::{BuildingPlacement, BuildingType, StockpileResource};
 use super::{BuildingDistance, DistanceKey};
 
 const TICKS_PER_CELL_FACTOR: u64 = 8;
+const MIN_FEAR_FACTOR: i32 = -5;
+const MAX_FEAR_FACTOR: i32 = 0;
+const WORKSHOP_FEAR_RING_LEN: usize = 10;
+const WORKSHOP_BASE_OUTPUT_RING: [u32; WORKSHOP_FEAR_RING_LEN] = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WeaponType {
@@ -47,7 +51,7 @@ impl WeaponType {
                 workshop_type: BuildingType::FletchersWorkshop,
                 wood_required: 2,
                 iron_required: 0,
-                make_time_ticks: 400,
+                make_time_ticks: 638,
                 sell_gold: 15,
             },
             Self::Crossbow => WeaponRecipe {
@@ -55,7 +59,7 @@ impl WeaponType {
                 workshop_type: BuildingType::FletchersWorkshop,
                 wood_required: 3,
                 iron_required: 0,
-                make_time_ticks: 550,
+                make_time_ticks: 565,
                 sell_gold: 30,
             },
             Self::Spear => WeaponRecipe {
@@ -63,7 +67,7 @@ impl WeaponType {
                 workshop_type: BuildingType::PoleturnersWorkshop,
                 wood_required: 1,
                 iron_required: 0,
-                make_time_ticks: 300,
+                make_time_ticks: 332,
                 sell_gold: 10,
             },
             Self::Pike => WeaponRecipe {
@@ -71,7 +75,7 @@ impl WeaponType {
                 workshop_type: BuildingType::PoleturnersWorkshop,
                 wood_required: 2,
                 iron_required: 0,
-                make_time_ticks: 600,
+                make_time_ticks: 872,
                 sell_gold: 18,
             },
             Self::Sword => WeaponRecipe {
@@ -79,7 +83,7 @@ impl WeaponType {
                 workshop_type: BuildingType::BlacksmithsWorkshop,
                 wood_required: 0,
                 iron_required: 1,
-                make_time_ticks: 600,
+                make_time_ticks: 1090,
                 sell_gold: 30,
             },
             Self::Mace => WeaponRecipe {
@@ -87,7 +91,7 @@ impl WeaponType {
                 workshop_type: BuildingType::BlacksmithsWorkshop,
                 wood_required: 0,
                 iron_required: 1,
-                make_time_ticks: 600,
+                make_time_ticks: 910,
                 sell_gold: 30,
             },
             Self::Armor => WeaponRecipe {
@@ -95,7 +99,7 @@ impl WeaponType {
                 workshop_type: BuildingType::ArmourersWorkshop,
                 wood_required: 0,
                 iron_required: 1,
-                make_time_ticks: 550,
+                make_time_ticks: 625,
                 sell_gold: 30,
             },
         }
@@ -121,6 +125,7 @@ impl WeaponRecipe {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SimulationSettings {
     pub game_speed_ticks_per_second: u32,
+    pub fear_factor: i32,
     pub optimized_fletcher_routing: bool,
     pub fletchers_weapon: WeaponType,
     pub poleturners_weapon: WeaponType,
@@ -131,6 +136,7 @@ impl Default for SimulationSettings {
     fn default() -> Self {
         Self {
             game_speed_ticks_per_second: 50,
+            fear_factor: 0,
             optimized_fletcher_routing: false,
             fletchers_weapon: WeaponType::Bow,
             poleturners_weapon: WeaponType::Spear,
@@ -149,6 +155,41 @@ impl SimulationSettings {
             _ => None,
         }
     }
+
+    pub fn average_weapon_output_per_cycle(self, building_type: BuildingType) -> f64 {
+        if !matches!(
+            building_type,
+            BuildingType::FletchersWorkshop
+                | BuildingType::BlacksmithsWorkshop
+                | BuildingType::PoleturnersWorkshop
+                | BuildingType::ArmourersWorkshop
+        ) {
+            return 0.0;
+        }
+
+        let ring = workshop_fear_output_ring(self.fear_factor);
+        let total = ring.iter().sum::<u32>();
+        total as f64 / WORKSHOP_FEAR_RING_LEN as f64
+    }
+}
+
+pub fn clamped_fear_factor(fear_factor: i32) -> i32 {
+    fear_factor.clamp(MIN_FEAR_FACTOR, MAX_FEAR_FACTOR)
+}
+
+pub fn workshop_fear_output_ring(fear_factor: i32) -> [u32; WORKSHOP_FEAR_RING_LEN] {
+    let mut ring = WORKSHOP_BASE_OUTPUT_RING;
+    let improved_one_count = clamped_fear_factor(fear_factor).unsigned_abs() as usize;
+
+    for output in ring
+        .iter_mut()
+        .filter(|output| **output == 1)
+        .take(improved_one_count)
+    {
+        *output = 2;
+    }
+
+    ring
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,7 +375,10 @@ pub(crate) fn travel_ticks_for_distance(building_type: BuildingType, distance_ce
 mod tests {
     use crate::buildings::{BuildingType, WORKSHOP_SLOWDOWN_BASE};
 
-    use super::{SimulationSettings, WeaponType, travel_ticks_for_distance};
+    use super::{
+        SimulationSettings, WeaponType, clamped_fear_factor, travel_ticks_for_distance,
+        workshop_fear_output_ring,
+    };
 
     #[test]
     fn travel_ticks_match_workshop_speed_formula() {
@@ -346,6 +390,7 @@ mod tests {
     fn default_settings_keep_fletcher_fix_disabled() {
         let settings = SimulationSettings::default();
         assert_eq!(settings.game_speed_ticks_per_second, 50);
+        assert_eq!(settings.fear_factor, 0);
         assert!(!settings.optimized_fletcher_routing);
         assert_eq!(settings.fletchers_weapon, WeaponType::Bow);
         assert_eq!(settings.poleturners_weapon, WeaponType::Spear);
@@ -356,5 +401,52 @@ mod tests {
     fn weapon_recipe_total_units_matches_resource_counts() {
         assert_eq!(WeaponType::Bow.recipe().total_required_units(), 2);
         assert_eq!(WeaponType::Sword.recipe().total_required_units(), 1);
+    }
+
+    #[test]
+    fn fear_factor_is_clamped_to_supported_range() {
+        assert_eq!(clamped_fear_factor(2), 0);
+        assert_eq!(clamped_fear_factor(-3), -3);
+        assert_eq!(clamped_fear_factor(-9), -5);
+    }
+
+    #[test]
+    fn workshop_fear_output_ring_improves_one_entries_from_front() {
+        assert_eq!(workshop_fear_output_ring(0), [1, 2, 1, 2, 1, 2, 1, 2, 1, 2]);
+        assert_eq!(
+            workshop_fear_output_ring(-2),
+            [2, 2, 2, 2, 1, 2, 1, 2, 1, 2]
+        );
+        assert_eq!(
+            workshop_fear_output_ring(-5),
+            [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+        );
+    }
+
+    #[test]
+    fn fear_factor_average_output_matches_ten_cycle_ring() {
+        let settings = SimulationSettings::default();
+        assert_eq!(
+            settings.average_weapon_output_per_cycle(BuildingType::FletchersWorkshop),
+            1.5
+        );
+
+        let settings = SimulationSettings {
+            fear_factor: -1,
+            ..SimulationSettings::default()
+        };
+        assert_eq!(
+            settings.average_weapon_output_per_cycle(BuildingType::FletchersWorkshop),
+            1.6
+        );
+
+        let settings = SimulationSettings {
+            fear_factor: -5,
+            ..SimulationSettings::default()
+        };
+        assert_eq!(
+            settings.average_weapon_output_per_cycle(BuildingType::FletchersWorkshop),
+            2.0
+        );
     }
 }

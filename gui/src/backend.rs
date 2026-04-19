@@ -40,6 +40,7 @@ pub struct CycleSimulationRow {
     pub total_ticks: Option<u64>,
     pub travel_ticks: Option<u64>,
     pub make_ticks: Option<u64>,
+    pub average_weapons_per_cycle: f64,
     pub wood_per_cycle: u32,
     pub iron_per_cycle: u32,
     pub error: Option<String>,
@@ -236,6 +237,7 @@ fn build_cycle_row(
 ) -> CycleSimulationRow {
     let workshop_name = format!("#{} {}", workshop_id, workshop_type.display_name());
     let recipe = weapon_type.recipe();
+    let average_weapons_per_cycle = settings.average_weapon_output_per_cycle(workshop_type);
 
     if armoury_ids.is_empty() {
         return CycleSimulationRow {
@@ -246,6 +248,7 @@ fn build_cycle_row(
             total_ticks: None,
             travel_ticks: None,
             make_ticks: None,
+            average_weapons_per_cycle,
             wood_per_cycle: recipe.wood_required,
             iron_per_cycle: recipe.iron_required,
             error: Some("No armoury placed".to_string()),
@@ -283,6 +286,7 @@ fn build_cycle_row(
             total_ticks: Some(cycle.total_ticks),
             travel_ticks: Some(cycle.travel_ticks),
             make_ticks: Some(cycle.make_ticks),
+            average_weapons_per_cycle,
             wood_per_cycle: recipe.wood_required,
             iron_per_cycle: recipe.iron_required,
             error: None,
@@ -297,6 +301,7 @@ fn build_cycle_row(
         total_ticks: None,
         travel_ticks: None,
         make_ticks: None,
+        average_weapons_per_cycle,
         wood_per_cycle: recipe.wood_required,
         iron_per_cycle: recipe.iron_required,
         error: Some(first_error.unwrap_or_else(|| "No reachable cycle".to_string())),

@@ -190,6 +190,35 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
+    let state_for_fear_factor = Arc::clone(&state);
+    let backend_for_fear_factor = backend.clone();
+    window.on_set_fear_factor(move |value| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_fear_factor
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            let changed = state.set_fear_factor(value);
+            if changed {
+                let message =
+                    match backend_for_fear_factor.send(BackendCommand::RunCycleSimulation {
+                        settings: state.simulation_settings(),
+                    }) {
+                        Ok(()) => format!(
+                            "Fear factor set to {}. Processing simulation...",
+                            state.fear_factor()
+                        ),
+                        Err(error) => error,
+                    };
+                refresh_view(&window, &state, &message);
+            } else {
+                window
+                    .set_status_text(format!("Fear factor remains {}", state.fear_factor()).into());
+                refresh_simulation_view(&window, &state);
+            }
+        }
+    });
+
+    let weak_window = window.as_weak();
     let state_for_tooltips = Arc::clone(&state);
     window.on_set_simulation_tooltips_enabled(move |enabled| {
         if let Some(window) = weak_window.upgrade() {
@@ -316,6 +345,7 @@ fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     window.set_selected_building(state.selected_id().unwrap_or_default().into());
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
+    window.set_fear_factor(state.fear_factor());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -355,6 +385,7 @@ fn refresh_preview(window: &MainWindow, state: &EditorState) {
 fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
+    window.set_fear_factor(state.fear_factor());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -380,8 +411,8 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
             let note = match (row.travel_ticks, row.make_ticks, row.error.as_ref()) {
                 (Some(travel_ticks), Some(make_ticks), _) => {
                     format!(
-                        "Travel: {} ticks, craft: {} ticks",
-                        travel_ticks, make_ticks
+                        "Travel: {} ticks, craft: {} ticks, avg output: {:.2}",
+                        travel_ticks, make_ticks, row.average_weapons_per_cycle
                     )
                 }
                 (_, _, Some(error)) => error.clone(),
@@ -498,7 +529,11 @@ fn build_workshop_hover_info(
                 ));
             }
 
-            let weapons_per_tick = 1.0 / total_ticks as f64;
+            lines.push(format!(
+                "Average output / cycle: {:.2}",
+                row.average_weapons_per_cycle
+            ));
+            let weapons_per_tick = row.average_weapons_per_cycle / total_ticks as f64;
             lines.push(format!(
                 "Output / tick: {}",
                 format_rate_tick(weapons_per_tick)
@@ -586,7 +621,7 @@ fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, St
             continue;
         };
 
-        let per_tick = 1.0 / total_ticks as f64;
+        let per_tick = row.average_weapons_per_cycle / total_ticks as f64;
         let key = row.weapon_type.display_name().to_string();
         *weapon_totals.entry(key).or_insert(0.0) += per_tick;
     }
