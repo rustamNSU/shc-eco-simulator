@@ -4,6 +4,12 @@ pub fn unit_speed_cells_per_tick(slowdown_base: u32) -> f64 {
     1.0 / (8.0 * ((slowdown_base as f64) + 1.0))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildingCost {
+    pub wood: u32,
+    pub gold: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildingType {
     GoodsYard,
@@ -76,11 +82,34 @@ impl BuildingType {
     pub fn worker_speed_cells_per_tick(self) -> Option<f64> {
         self.worker_slowdown_base().map(unit_speed_cells_per_tick)
     }
+
+    pub fn build_cost(self) -> BuildingCost {
+        match self {
+            Self::GoodsYard | Self::Stockpile => BuildingCost { wood: 0, gold: 0 },
+            Self::Armoury => BuildingCost { wood: 5, gold: 0 },
+            Self::FletchersWorkshop => BuildingCost {
+                wood: 20,
+                gold: 100,
+            },
+            Self::BlacksmithsWorkshop => BuildingCost {
+                wood: 20,
+                gold: 200,
+            },
+            Self::PoleturnersWorkshop => BuildingCost {
+                wood: 10,
+                gold: 100,
+            },
+            Self::ArmourersWorkshop => BuildingCost {
+                wood: 20,
+                gold: 100,
+            },
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};
+    use super::{BuildingCost, BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};
 
     #[test]
     fn speed_formula_matches_spec() {
@@ -112,5 +141,41 @@ mod tests {
         assert_eq!(BuildingType::GoodsYard.worker_speed_cells_per_tick(), None);
         assert_eq!(BuildingType::Stockpile.worker_speed_cells_per_tick(), None);
         assert_eq!(BuildingType::Armoury.worker_speed_cells_per_tick(), None);
+    }
+
+    #[test]
+    fn build_costs_match_domain_table() {
+        assert_eq!(
+            BuildingType::Armoury.build_cost(),
+            BuildingCost { wood: 5, gold: 0 }
+        );
+        assert_eq!(
+            BuildingType::FletchersWorkshop.build_cost(),
+            BuildingCost {
+                wood: 20,
+                gold: 100
+            }
+        );
+        assert_eq!(
+            BuildingType::BlacksmithsWorkshop.build_cost(),
+            BuildingCost {
+                wood: 20,
+                gold: 200
+            }
+        );
+        assert_eq!(
+            BuildingType::PoleturnersWorkshop.build_cost(),
+            BuildingCost {
+                wood: 10,
+                gold: 100
+            }
+        );
+        assert_eq!(
+            BuildingType::ArmourersWorkshop.build_cost(),
+            BuildingCost {
+                wood: 20,
+                gold: 100
+            }
+        );
     }
 }

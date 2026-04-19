@@ -4,14 +4,14 @@ pub mod simulation;
 pub mod walls;
 
 pub use buildings::{
-    BuildingComponent, BuildingComponentType, BuildingPlacement, BuildingType, EntryPoint,
-    Footprint, StockpileResource, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick,
+    BuildingComponent, BuildingComponentType, BuildingCost, BuildingPlacement, BuildingType,
+    EntryPoint, Footprint, StockpileResource, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick,
 };
 pub use map::{CellMap, MapError};
 pub use simulation::{
-    BuildingDistance, DistanceKey, GameTime, ProductionCycle, ProductionCycleError,
+    BuildingDistance, DistanceKey, GameTime, IRON_BUY_GOLD, ProductionCycle, ProductionCycleError,
     ProductionRouteUsage, RemoveOutcome, SimulationSettings, Simulator, SimulatorError,
-    WeaponRecipe, WeaponType, clamped_fear_factor, workshop_fear_output_ring,
+    WOOD_BUY_GOLD, WeaponRecipe, WeaponType, clamped_fear_factor, workshop_fear_output_ring,
 };
 pub use walls::WallSegment;
 

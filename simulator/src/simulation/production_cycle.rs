@@ -7,6 +7,8 @@ const MIN_FEAR_FACTOR: i32 = -5;
 const MAX_FEAR_FACTOR: i32 = 0;
 const WORKSHOP_FEAR_RING_LEN: usize = 10;
 const WORKSHOP_BASE_OUTPUT_RING: [u32; WORKSHOP_FEAR_RING_LEN] = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2];
+pub const WOOD_BUY_GOLD: u32 = 4;
+pub const IRON_BUY_GOLD: u32 = 45;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WeaponType {
@@ -126,6 +128,8 @@ impl WeaponRecipe {
 pub struct SimulationSettings {
     pub game_speed_ticks_per_second: u32,
     pub fear_factor: i32,
+    pub buy_wood: bool,
+    pub buy_iron: bool,
     pub optimized_fletcher_routing: bool,
     pub fletchers_weapon: WeaponType,
     pub poleturners_weapon: WeaponType,
@@ -137,6 +141,8 @@ impl Default for SimulationSettings {
         Self {
             game_speed_ticks_per_second: 50,
             fear_factor: 0,
+            buy_wood: true,
+            buy_iron: true,
             optimized_fletcher_routing: false,
             fletchers_weapon: WeaponType::Bow,
             poleturners_weapon: WeaponType::Spear,
@@ -170,6 +176,21 @@ impl SimulationSettings {
         let ring = workshop_fear_output_ring(self.fear_factor);
         let total = ring.iter().sum::<u32>();
         total as f64 / WORKSHOP_FEAR_RING_LEN as f64
+    }
+
+    pub fn resource_buy_gold_per_cycle(self, recipe: WeaponRecipe) -> u32 {
+        let wood_cost = if self.buy_wood {
+            recipe.wood_required * WOOD_BUY_GOLD
+        } else {
+            0
+        };
+        let iron_cost = if self.buy_iron {
+            recipe.iron_required * IRON_BUY_GOLD
+        } else {
+            0
+        };
+
+        wood_cost + iron_cost
     }
 }
 
@@ -391,6 +412,8 @@ mod tests {
         let settings = SimulationSettings::default();
         assert_eq!(settings.game_speed_ticks_per_second, 50);
         assert_eq!(settings.fear_factor, 0);
+        assert!(settings.buy_wood);
+        assert!(settings.buy_iron);
         assert!(!settings.optimized_fletcher_routing);
         assert_eq!(settings.fletchers_weapon, WeaponType::Bow);
         assert_eq!(settings.poleturners_weapon, WeaponType::Spear);
@@ -401,6 +424,27 @@ mod tests {
     fn weapon_recipe_total_units_matches_resource_counts() {
         assert_eq!(WeaponType::Bow.recipe().total_required_units(), 2);
         assert_eq!(WeaponType::Sword.recipe().total_required_units(), 1);
+    }
+
+    #[test]
+    fn resource_buy_gold_per_cycle_respects_buy_settings() {
+        let bow = WeaponType::Bow.recipe();
+        assert_eq!(
+            SimulationSettings::default().resource_buy_gold_per_cycle(bow),
+            8
+        );
+
+        let free_wood = SimulationSettings {
+            buy_wood: false,
+            ..SimulationSettings::default()
+        };
+        assert_eq!(free_wood.resource_buy_gold_per_cycle(bow), 0);
+
+        let sword = WeaponType::Sword.recipe();
+        assert_eq!(
+            SimulationSettings::default().resource_buy_gold_per_cycle(sword),
+            45
+        );
     }
 
     #[test]

@@ -12,4 +12,4 @@ pub use factory::BuildingFactory;
 pub use footprint::Footprint;
 pub use placement::BuildingPlacement;
 pub use stockpile_resource::StockpileResource;
-pub use types::{BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};
+pub use types::{BuildingCost, BuildingType, WORKSHOP_SLOWDOWN_BASE, unit_speed_cells_per_tick};

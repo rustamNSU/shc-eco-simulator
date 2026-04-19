@@ -9,7 +9,7 @@ mod worker_distance;
 pub use distance::{BuildingDistance, DistanceKey};
 pub use game_time::GameTime;
 pub use production_cycle::{
-    ProductionCycle, ProductionCycleError, ProductionRouteUsage, SimulationSettings, WeaponRecipe,
-    WeaponType, clamped_fear_factor, workshop_fear_output_ring,
+    IRON_BUY_GOLD, ProductionCycle, ProductionCycleError, ProductionRouteUsage, SimulationSettings,
+    WOOD_BUY_GOLD, WeaponRecipe, WeaponType, clamped_fear_factor, workshop_fear_output_ring,
 };
 pub use simulator::{RemoveOutcome, Simulator, SimulatorError};

@@ -74,6 +74,17 @@ impl From<MapError> for SimulatorError {
     }
 }
 
+fn is_entry_point_available(
+    map: &CellMap,
+    entry_point: Option<crate::buildings::EntryPoint>,
+) -> bool {
+    let Some(entry_point) = entry_point else {
+        return false;
+    };
+
+    map.is_in_bounds(entry_point.x, entry_point.y) && !map.is_occupied(entry_point.x, entry_point.y)
+}
+
 impl Simulator {
     pub fn new(map_size: usize) -> Result<Self, SimulatorError> {
         if map_size == 0 {
@@ -157,7 +168,7 @@ impl Simulator {
             }
 
             self.buildings.extend(stacks);
-            self.recalculate_entry_points();
+            self.refresh_unavailable_entry_points();
             self.recompute_distances();
             return Ok(first_id);
         }
@@ -167,7 +178,7 @@ impl Simulator {
         self.assign_entry_points(&mut placement);
         let id = placement.id;
         self.buildings.push(placement);
-        self.recalculate_entry_points();
+        self.refresh_unavailable_entry_points();
         self.recompute_distances();
         Ok(id)
     }
@@ -188,7 +199,7 @@ impl Simulator {
         self.map.place_cells(wall.id, cells.iter().copied())?;
         self.walls.push(wall);
         self.next_wall_id += 1;
-        self.recalculate_entry_points();
+        self.refresh_unavailable_entry_points();
         self.recompute_distances();
 
         Ok(wall.id)
@@ -254,6 +265,7 @@ impl Simulator {
             self.map.clear_cells(wall.cells());
         }
 
+        self.refresh_unavailable_entry_points();
         self.recompute_distances();
         count
     }
@@ -386,29 +398,37 @@ impl Simulator {
         }
     }
 
-    fn recalculate_entry_points(&mut self) {
+    fn refresh_unavailable_entry_points(&mut self) {
         for index in 0..self.buildings.len() {
             let (building_entry, component_entries) = {
                 let building = &self.buildings[index];
-                let building_entry = calculate_building_entry(
-                    &self.map,
-                    &self.walls,
-                    building.building_type,
-                    building.x,
-                    building.y,
-                    building.width(),
-                );
+                let building_entry = if is_entry_point_available(&self.map, building.entry_point) {
+                    building.entry_point
+                } else {
+                    calculate_building_entry(
+                        &self.map,
+                        &self.walls,
+                        building.building_type,
+                        building.x,
+                        building.y,
+                        building.width(),
+                    )
+                };
                 let component_entries = building
                     .components()
                     .iter()
                     .map(|component| {
-                        resolve_entry_point_for_square(
-                            &self.map,
-                            component.x,
-                            component.y,
-                            component.size,
-                            0,
-                        )
+                        if is_entry_point_available(&self.map, component.entry_point) {
+                            component.entry_point
+                        } else {
+                            resolve_entry_point_for_square(
+                                &self.map,
+                                component.x,
+                                component.y,
+                                component.size,
+                                0,
+                            )
+                        }
                     })
                     .collect::<Vec<_>>();
                 (building_entry, component_entries)
@@ -460,6 +480,7 @@ impl Simulator {
         self.buildings = kept;
 
         if !removed_ids.is_empty() {
+            self.refresh_unavailable_entry_points();
             self.recompute_distances();
         }
 
@@ -469,6 +490,7 @@ impl Simulator {
     fn remove_wall_by_index(&mut self, index: usize) -> u32 {
         let wall = self.walls.remove(index);
         self.map.clear_cells(wall.cells());
+        self.refresh_unavailable_entry_points();
         self.recompute_distances();
         wall.id
     }
@@ -877,6 +899,45 @@ mod tests {
             .expect("workshop should exist")
             .entry_point;
         assert_eq!(after, Some(EntryPoint { x: 9, y: 12 }));
+    }
+
+    #[test]
+    fn removing_wall_assigns_entry_only_when_building_had_none() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_wall(5, 5, 10, 5)
+            .expect("bottom wall should be placed");
+        simulator
+            .place_wall(5, 10, 10, 10)
+            .expect("top wall should be placed");
+        simulator
+            .place_wall(5, 6, 5, 9)
+            .expect("left wall should be placed");
+        simulator
+            .place_wall(10, 6, 10, 9)
+            .expect("right wall should be placed");
+
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 6, 6)
+            .expect("armoury should be placed inside blocked perimeter");
+        let before = simulator
+            .buildings()
+            .iter()
+            .find(|b| b.id == armoury_id)
+            .expect("armoury should exist")
+            .entry_point;
+        assert_eq!(before, None);
+
+        let outcome = simulator.remove_at(8, 5);
+        assert!(matches!(outcome, RemoveOutcome::Wall { .. }));
+
+        let after = simulator
+            .buildings()
+            .iter()
+            .find(|b| b.id == armoury_id)
+            .expect("armoury should exist")
+            .entry_point;
+        assert_eq!(after, Some(EntryPoint { x: 8, y: 5 }));
     }
 
     #[test]

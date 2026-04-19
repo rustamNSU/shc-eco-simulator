@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use simulator::WeaponType;
+use simulator::{BuildingType, WOOD_BUY_GOLD, WeaponType};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::{
@@ -219,6 +219,48 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
+    let state_for_buy_wood = Arc::clone(&state);
+    window.on_set_buy_wood(move |enabled| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_buy_wood
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            let changed = state.set_buy_wood(enabled);
+            let message = if changed {
+                if enabled {
+                    "Buy Wood enabled"
+                } else {
+                    "Buy Wood disabled"
+                }
+            } else {
+                "Buy Wood unchanged"
+            };
+            refresh_view(&window, &state, message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_buy_iron = Arc::clone(&state);
+    window.on_set_buy_iron(move |enabled| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_buy_iron
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            let changed = state.set_buy_iron(enabled);
+            let message = if changed {
+                if enabled {
+                    "Buy Iron enabled"
+                } else {
+                    "Buy Iron disabled"
+                }
+            } else {
+                "Buy Iron unchanged"
+            };
+            refresh_view(&window, &state, message);
+        }
+    });
+
+    let weak_window = window.as_weak();
     let state_for_tooltips = Arc::clone(&state);
     window.on_set_simulation_tooltips_enabled(move |enabled| {
         if let Some(window) = weak_window.upgrade() {
@@ -346,6 +388,10 @@ fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
     window.set_fear_factor(state.fear_factor());
+    window.set_buy_wood(state.buy_wood());
+    window.set_buy_iron(state.buy_iron());
+    window.set_eco_setup_cost(build_eco_setup_summary(state).into());
+    window.set_workshop_count_summary(build_workshop_count_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -386,6 +432,10 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
     window.set_fear_factor(state.fear_factor());
+    window.set_buy_wood(state.buy_wood());
+    window.set_buy_iron(state.buy_iron());
+    window.set_eco_setup_cost(build_eco_setup_summary(state).into());
+    window.set_workshop_count_summary(build_workshop_count_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -474,6 +524,66 @@ fn weapon_id(weapon: WeaponType) -> &'static str {
     }
 }
 
+fn build_eco_setup_summary(state: &EditorState) -> String {
+    let mut gold = 0_u32;
+    let mut wood = 0_u32;
+
+    for building in state.simulator().buildings() {
+        let cost = building.building_type.build_cost();
+        gold += cost.gold;
+        wood += cost.wood;
+    }
+
+    if state.buy_wood() {
+        let bought_wood_gold = wood * WOOD_BUY_GOLD;
+        return format!(
+            "Eco setup cost: {} gold ({} build wood bought)",
+            gold + bought_wood_gold,
+            wood
+        );
+    }
+
+    format!("Eco setup needs: {} gold + {} wood", gold, wood)
+}
+
+fn build_workshop_count_summary(state: &EditorState) -> String {
+    let count = |building_type| {
+        state
+            .simulator()
+            .buildings()
+            .iter()
+            .filter(|building| building.building_type == building_type)
+            .count()
+    };
+
+    format!(
+        "Workshop count\nFletchers: {}\nPoleturners: {}\nBlacksmiths: {}\nArmourers: {}\nArmouries: {}",
+        count(BuildingType::FletchersWorkshop),
+        count(BuildingType::PoleturnersWorkshop),
+        count(BuildingType::BlacksmithsWorkshop),
+        count(BuildingType::ArmourersWorkshop),
+        count(BuildingType::Armoury)
+    )
+}
+
+fn net_gold_per_cycle(row: &crate::backend::CycleSimulationRow, state: &EditorState) -> f64 {
+    let recipe = row.weapon_type.recipe();
+    let gross_gold = row.average_weapons_per_cycle * recipe.sell_gold as f64;
+    let bought_resource_gold = state
+        .simulation_settings()
+        .resource_buy_gold_per_cycle(recipe) as f64;
+
+    gross_gold - bought_resource_gold
+}
+
+fn net_gold_per_minute(
+    row: &crate::backend::CycleSimulationRow,
+    state: &EditorState,
+    total_ticks: u64,
+) -> f64 {
+    net_gold_per_cycle(row, state) / total_ticks as f64 * state.game_speed() as f64 * 60.0
+}
+
 fn build_hover_simulation_info(state: &EditorState) -> (String, String, Vec<String>) {
     let Some(building) = state.hovered_building() else {
         return (String::new(), String::new(), Vec::new());
@@ -541,6 +651,10 @@ fn build_workshop_hover_info(
             lines.push(format!(
                 "Output / min: {}",
                 format_rate_minute(weapons_per_tick * state.game_speed() as f64 * 60.0)
+            ));
+            lines.push(format!(
+                "Net gold / min: {}",
+                format_rate_minute(net_gold_per_minute(row, state, total_ticks))
             ));
         }
         _ => {
@@ -611,6 +725,7 @@ fn build_stockpile_hover_info(
 
 fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, String, Vec<String>) {
     let mut weapon_totals = std::collections::BTreeMap::new();
+    let mut total_gold_per_minute = 0.0;
 
     for row in state
         .cycle_rows()
@@ -622,8 +737,12 @@ fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, St
         };
 
         let per_tick = row.average_weapons_per_cycle / total_ticks as f64;
+        let gold_per_minute = net_gold_per_minute(row, state, total_ticks);
+        total_gold_per_minute += gold_per_minute;
         let key = row.weapon_type.display_name().to_string();
-        *weapon_totals.entry(key).or_insert(0.0) += per_tick;
+        let totals = weapon_totals.entry(key).or_insert((0.0, 0.0));
+        totals.0 += per_tick;
+        totals.1 += gold_per_minute;
     }
 
     let mut lines = Vec::new();
@@ -631,20 +750,25 @@ fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, St
     if weapon_totals.is_empty() {
         lines.push("No completed workshop cycles are routed here".to_string());
     } else {
-        for (index, (weapon_name, per_tick)) in weapon_totals.into_iter().enumerate() {
-            if index > 0 {
+        lines.push(format!(
+            "Total gold / min: {}",
+            format_rate_minute(total_gold_per_minute)
+        ));
+
+        for (weapon_name, (per_tick, gold_per_minute)) in weapon_totals.into_iter() {
+            if !lines.is_empty() {
                 lines.push(String::new());
             }
 
             lines.push(format!(
-                "{} per tick: {}",
-                weapon_name,
-                format_rate_tick(per_tick)
-            ));
-            lines.push(format!(
-                "{} per min: {}",
+                "{} output / min: {}",
                 weapon_name,
                 format_rate_minute(per_tick * state.game_speed() as f64 * 60.0)
+            ));
+            lines.push(format!(
+                "{} gold / min: {}",
+                weapon_name,
+                format_rate_minute(gold_per_minute)
             ));
         }
     }

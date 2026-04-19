@@ -207,6 +207,14 @@ impl EditorState {
         self.simulation_settings.fear_factor
     }
 
+    pub fn buy_wood(&self) -> bool {
+        self.simulation_settings.buy_wood
+    }
+
+    pub fn buy_iron(&self) -> bool {
+        self.simulation_settings.buy_iron
+    }
+
     pub fn optimized_fletcher_routing(&self) -> bool {
         self.simulation_settings.optimized_fletcher_routing
     }
@@ -228,6 +236,24 @@ impl EditorState {
         }
 
         self.simulation_settings.fear_factor = snapped;
+        true
+    }
+
+    pub fn set_buy_wood(&mut self, enabled: bool) -> bool {
+        if self.simulation_settings.buy_wood == enabled {
+            return false;
+        }
+
+        self.simulation_settings.buy_wood = enabled;
+        true
+    }
+
+    pub fn set_buy_iron(&mut self, enabled: bool) -> bool {
+        if self.simulation_settings.buy_iron == enabled {
+            return false;
+        }
+
+        self.simulation_settings.buy_iron = enabled;
         true
     }
 

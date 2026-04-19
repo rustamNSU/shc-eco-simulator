@@ -178,6 +178,70 @@ component PrimaryActionButton inherits Rectangle {
     }
 }
 
+component BuyResourceToggle inherits Rectangle {
+    in property <string> title;
+    in property <image> icon;
+    in property <bool> checked;
+    callback changed(bool);
+
+    height: 42px;
+    horizontal-stretch: 1;
+    border-width: 1px;
+    border-color: root.checked ? #2f6fb2 : #cfd6df;
+    border-radius: 7px;
+    background: root.checked ? #edf5ff : #ffffff;
+
+    Rectangle {
+        x: 10px;
+        y: 12px;
+        width: 18px;
+        height: 18px;
+        border-width: 1px;
+        border-color: root.checked ? #1f6db5 : #9aa3af;
+        border-radius: 3px;
+        background: root.checked ? #1f75c1 : #ffffff;
+
+        Text {
+            width: 100%;
+            height: 100%;
+            text: root.checked ? "x" : "";
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    Image {
+        x: 38px;
+        y: 7px;
+        width: 28px;
+        height: 28px;
+        source: root.icon;
+        image-fit: contain;
+    }
+
+    Text {
+        x: 74px;
+        y: 0px;
+        width: parent.width - 84px;
+        height: 100%;
+        text: root.title;
+        color: #1f2937;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    TouchArea {
+        clicked => {
+            root.changed(!root.checked);
+        }
+    }
+}
+
 component ToolButton inherits Rectangle {
     in property <string> title;
     in property <string> tool-id;
@@ -281,6 +345,10 @@ export component MainWindow inherits Window {
     in-out property <bool> optimize-fletcher-routing: false;
     in-out property <int> game-speed: 50;
     in-out property <int> fear-factor: 0;
+    in-out property <bool> buy-wood: true;
+    in-out property <bool> buy-iron: true;
+    in property <string> eco-setup-cost: "Eco setup cost: 0 gold";
+    in property <string> workshop-count-summary: "";
     in-out property <string> fletchers-weapon: "bow";
     in-out property <string> poleturners-weapon: "spear";
     in-out property <string> blacksmiths-weapon: "sword";
@@ -294,6 +362,8 @@ export component MainWindow inherits Window {
     callback set-optimize-fletcher-routing(bool);
     callback set-game-speed(float);
     callback set-fear-factor(float);
+    callback set-buy-wood(bool);
+    callback set-buy-iron(bool);
     callback run-simulation();
     callback set-simulation-tooltips-enabled(bool);
     callback toggle-fletchers-weapon();
@@ -343,6 +413,12 @@ export component MainWindow inherits Window {
                     CheckBox {
                         checked <=> root.show-entry-points;
                         text: "Plot entry points";
+                    }
+
+                    CheckBox {
+                        checked: root.simulation-tooltips-enabled;
+                        text: "Show tooltips";
+                        toggled => { root.set-simulation-tooltips-enabled(self.checked); }
                     }
 
                     CheckBox {
@@ -885,69 +961,71 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    CheckBox {
-                        checked: root.simulation-tooltips-enabled;
-                        text: "Show tooltips";
-                        toggled => { root.set-simulation-tooltips-enabled(self.checked); }
+                    HorizontalBox {
+                        spacing: 8px;
+                        min-height: 42px;
+                        max-height: 42px;
+
+                        BuyResourceToggle {
+                            title: "Buy Wood";
+                            icon: @image-url("../assets/goods/wood.png");
+                            checked: root.buy-wood;
+                            changed(value) => { root.set-buy-wood(value); }
+                        }
+
+                        BuyResourceToggle {
+                            title: "Buy Iron";
+                            icon: @image-url("../assets/goods/iron.png");
+                            checked: root.buy-iron;
+                            changed(value) => { root.set-buy-iron(value); }
+                        }
                     }
 
                     Rectangle {
+                        min-height: 34px;
+                        max-height: 34px;
                         border-width: 1px;
-                        border-color: #d9dde2;
+                        border-color: #d3d9e2;
                         border-radius: 6px;
-                        background: #ffffff;
-                        horizontal-stretch: 1;
-                        vertical-stretch: 1;
+                        background: #fbfcfe;
 
                         Text {
-                            x: 12px;
-                            y: 12px;
-                            text: "Run simulation to calculate workshop cycle time.";
-                            color: #6b7280;
-                            visible: root.simulation-cycles.length == 0;
-                        }
-
-                        ScrollView {
-                            width: 100%;
+                            x: 10px;
+                            y: 0px;
+                            width: parent.width - 20px;
                             height: 100%;
-                            visible: root.simulation-cycles.length > 0;
-
-                            VerticalBox {
-                                width: 100%;
-                                spacing: 6px;
-                                padding: 8px;
-
-                                for item in root.simulation-cycles: Rectangle {
-                                    min-height: 74px;
-                                    border-width: 1px;
-                                    border-color: #d8dde5;
-                                    border-radius: 6px;
-                                    background: #f9fafc;
-
-                                    VerticalBox {
-                                        padding: 8px;
-                                        spacing: 4px;
-
-                                        Text {
-                                            text: item.workshop + " - " + item.weapon;
-                                            font-weight: 600;
-                                            color: #1f2937;
-                                        }
-
-                                        Text {
-                                            text: "Armoury: " + item.armoury + " | Ticks: " + item.ticks + " | Seconds: " + item.seconds;
-                                            color: #4b5563;
-                                        }
-
-                                        Text {
-                                            text: item.note;
-                                            color: #6b7280;
-                                            wrap: word-wrap;
-                                        }
-                                    }
-                                }
-                            }
+                            text: root.eco-setup-cost;
+                            color: #374151;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
                         }
+                    }
+
+                    Rectangle {
+                        min-height: 114px;
+                        max-height: 114px;
+                        border-width: 1px;
+                        border-color: #d3d9e2;
+                        border-radius: 6px;
+                        background: #fbfcfe;
+
+                        Text {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            height: parent.height - 16px;
+                            text: root.workshop-count-summary;
+                            color: #374151;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        background: transparent;
                     }
                 }
             }
