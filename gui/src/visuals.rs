@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use simulator::{BuildingType, Simulator, StockpileResource};
 
-use crate::{BuildingListItem, MapMarker, OccupiedCellVisual};
+use crate::{BuildingBoundary, BuildingListItem, MapMarker, OccupiedCellVisual};
 
 pub fn building_color(building_type: BuildingType) -> slint::Color {
     match building_type {
@@ -55,6 +57,88 @@ pub fn build_preview_cells(cells: &[(i32, i32)]) -> Vec<OccupiedCellVisual> {
     }
 
     result
+}
+
+pub fn build_building_boundaries(simulator: &Simulator) -> Vec<BuildingBoundary> {
+    let mut goods_yard_origins = BTreeMap::new();
+    let mut edges = BTreeSet::new();
+
+    for building in simulator.buildings() {
+        if let Some(group_id) = building.goods_yard_group_id {
+            let entry = goods_yard_origins
+                .entry(group_id)
+                .or_insert((building.x, building.y));
+            entry.0 = entry.0.min(building.x);
+            entry.1 = entry.1.min(building.y);
+            continue;
+        }
+
+        append_boundary_edges(
+            &mut edges,
+            building.x,
+            building.y,
+            building.width(),
+            building.height(),
+        );
+    }
+
+    for (_, (x, y)) in goods_yard_origins {
+        append_boundary_edges(&mut edges, x, y, 5, 5);
+    }
+
+    edges
+        .into_iter()
+        .map(|edge| BuildingBoundary {
+            x: edge.x as i32,
+            y: edge.y as i32,
+            horizontal: edge.horizontal,
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BoundaryEdge {
+    x: usize,
+    y: usize,
+    horizontal: bool,
+}
+
+fn append_boundary_edges(
+    edges: &mut BTreeSet<BoundaryEdge>,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    for dx in 0..width {
+        edges.insert(BoundaryEdge {
+            x: x + dx,
+            y,
+            horizontal: true,
+        });
+        edges.insert(BoundaryEdge {
+            x: x + dx,
+            y: y + height,
+            horizontal: true,
+        });
+    }
+
+    for dy in 0..height {
+        edges.insert(BoundaryEdge {
+            x,
+            y: y + dy,
+            horizontal: false,
+        });
+        edges.insert(BoundaryEdge {
+            x: x + width,
+            y: y + dy,
+            horizontal: false,
+        });
+    }
 }
 
 pub fn build_building_list(simulator: &Simulator) -> Vec<BuildingListItem> {

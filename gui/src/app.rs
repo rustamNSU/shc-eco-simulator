@@ -401,6 +401,10 @@ fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     let model = VecModel::from(cells);
     window.set_occupied_cells(ModelRc::new(model));
 
+    let boundaries = visuals::build_building_boundaries(state.simulator());
+    let boundary_model = VecModel::from(boundaries);
+    window.set_building_boundaries(ModelRc::new(boundary_model));
+
     let list_entries = visuals::build_building_list(state.simulator());
     let list_model = VecModel::from(list_entries);
     window.set_placed_buildings(ModelRc::new(list_model));

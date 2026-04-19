@@ -22,6 +22,12 @@ export struct MapMarker {
     bg: color,
 }
 
+export struct BuildingBoundary {
+    x: int,
+    y: int,
+    horizontal: bool,
+}
+
 export struct SimulationCycleItem {
     workshop: string,
     weapon: string,
@@ -329,6 +335,7 @@ export component MainWindow inherits Window {
     in property <[OccupiedCellVisual]> preview-cells;
     in property <[OccupiedCellVisual]> no-entry-cells;
     in property <[BuildingListItem]> placed-buildings;
+    in property <[BuildingBoundary]> building-boundaries;
     in property <[MapMarker]> anchor-labels;
     in property <[MapMarker]> entry-labels;
     in property <[MapMarker]> resource-labels;
@@ -637,6 +644,19 @@ export component MainWindow inherits Window {
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: cell.color;
+                            }
+
+                            for boundary in root.building-boundaries: Rectangle {
+                                property <length> line-width: max(1px, root.cell-px / 6);
+                                x: boundary.horizontal
+                                    ? boundary.x * root.cell-px
+                                    : boundary.x * root.cell-px - (self.line-width / 2);
+                                y: boundary.horizontal
+                                    ? (root.map-size - boundary.y) * root.cell-px - (self.line-width / 2)
+                                    : (root.map-size - boundary.y - 1) * root.cell-px;
+                                width: boundary.horizontal ? root.cell-px : self.line-width;
+                                height: boundary.horizontal ? self.line-width : root.cell-px;
+                                background: #111111;
                             }
 
                             for label in root.anchor-labels: Text {
