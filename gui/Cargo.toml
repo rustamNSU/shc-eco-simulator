@@ -3,9 +3,14 @@ name = "gui"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "SHCEcoSim"
+path = "src/main.rs"
+
 [dependencies]
 simulator = { path = "../simulator" }
 slint = "1"
 
 [build-dependencies]
 slint-build = "1"
+winresource = "0.1"
