@@ -9,6 +9,30 @@ This repository has two crates:
 - `simulator`: core simulation/domain logic (map, buildings, placement rules, game time, simulation state)
 - `gui`: Slint desktop UI for map editing, scenario setup, simulation control, and later charts/plots
 
+## Table of Contents
+
+- [Current Status](#current-status)
+- [Product Vision](#product-vision)
+- [Documentation](#documentation)
+- [Domain Baseline](#domain-baseline)
+  - [Map](#map)
+  - [Building Placement](#building-placement)
+  - [Initial Building Types](#initial-building-types)
+  - [Building Costs and Build Resources](#building-costs-and-build-resources)
+  - [Goods Buy/Sell Costs](#goods-buysell-costs)
+  - [Weapon Production and Sale](#weapon-production-and-sale)
+  - [Production Cycle Model](#production-cycle-model)
+  - [Wall Object](#wall-object)
+  - [Worker Speed](#worker-speed)
+  - [Distance Objects](#distance-objects)
+- [Architecture](#architecture)
+  - [Workspace](#workspace)
+  - [`simulator` crate structure](#simulator-crate-structure)
+  - [`gui` crate structure](#gui-crate-structure)
+- [Build and Run](#build-and-run)
+- [Coding Standards](#coding-standards)
+- [Notes](#notes)
+
 ## Current Status
 
 This is an early foundation build.
@@ -38,6 +62,12 @@ The simulator is intended to answer practical questions such as:
 - Which workshop/stockyard/armoury arrangement is best under map constraints?
 
 The UI should let users quickly paint layouts, run simulation steps, and inspect metrics visually.
+
+## Documentation
+
+Additional domain notes live in `doc/`.
+
+- [Unit movement speed](doc/unit_movement_speed.md) documents the tick formula, unit slowdown and speed-up coefficients, terrain slowdown modifiers, quick per-cell tick references, and a requested army-unit reference set with movement timings and damage data.
 
 ## Domain Baseline
 
@@ -162,12 +192,12 @@ If a weapon needs `2` wood or `2` iron, that means two separate stockpile-to-wor
 
 ## Architecture
 
-## Workspace
+### Workspace
 
 - root `Cargo.toml` defines workspace members
 - each crate owns its own concerns
 
-## `simulator` crate structure
+### `simulator` crate structure
 
 - `buildings/`
   - building definitions and placement data
@@ -185,7 +215,7 @@ Design principles:
 - explicit data flow
 - low complexity over clever abstractions
 
-## `gui` crate structure
+### `gui` crate structure
 
 - `ui/` Slint UI files
 - `src/` Rust UI integration and controller logic
