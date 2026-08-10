@@ -270,6 +270,23 @@ impl Simulator {
         count
     }
 
+    pub fn remove_all(&mut self) -> (usize, usize) {
+        let building_count = self.buildings.len();
+        let wall_count = self.walls.len();
+
+        for building in self.buildings.drain(..) {
+            self.map.clear_cells(building.occupied_cells());
+        }
+        for wall in self.walls.drain(..) {
+            self.map.clear_cells(wall.cells());
+        }
+
+        self.distances.clear();
+        self.worker_distances.clear();
+
+        (building_count, wall_count)
+    }
+
     pub fn tick(&mut self, delta_ticks: u64) {
         self.time.advance(delta_ticks);
     }
@@ -770,23 +787,31 @@ mod tests {
     }
 
     #[test]
-    fn workshop_wall_contact_right_side_rotates_default_to_left() {
-        let mut simulator = Simulator::new(40).expect("simulator should be created");
-        simulator
-            .place_wall(14, 10, 14, 13)
-            .expect("wall should be placed");
+    fn workshop_entry_rotates_with_wall_orientation() {
+        let cases = [
+            ((10, 14, 13, 14), EntryPoint { x: 12, y: 9 }),
+            ((14, 10, 14, 13), EntryPoint { x: 9, y: 11 }),
+            ((10, 9, 13, 9), EntryPoint { x: 11, y: 14 }),
+            ((9, 10, 9, 13), EntryPoint { x: 14, y: 12 }),
+        ];
 
-        simulator
-            .place_building(BuildingType::FletchersWorkshop, 10, 10)
-            .expect("workshop should be placed");
+        for ((start_x, start_y, end_x, end_y), expected_entry) in cases {
+            let mut simulator = Simulator::new(40).expect("simulator should be created");
+            simulator
+                .place_wall(start_x, start_y, end_x, end_y)
+                .expect("wall should be placed");
+            simulator
+                .place_building(BuildingType::FletchersWorkshop, 10, 10)
+                .expect("workshop should be placed");
 
-        let workshop = simulator
-            .buildings()
-            .iter()
-            .find(|b| b.x == 10 && b.y == 10)
-            .expect("workshop should exist");
+            let workshop = simulator
+                .buildings()
+                .iter()
+                .find(|b| b.x == 10 && b.y == 10)
+                .expect("workshop should exist");
 
-        assert_eq!(workshop.entry_point, Some(EntryPoint { x: 9, y: 12 }));
+            assert_eq!(workshop.entry_point, Some(expected_entry));
+        }
     }
 
     #[test]
@@ -872,6 +897,30 @@ mod tests {
     }
 
     #[test]
+    fn remove_all_clears_buildings_walls_and_distances() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Armoury, 2, 2)
+            .expect("armoury should be placed");
+        simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 2)
+            .expect("workshop should be placed");
+        simulator
+            .place_wall(2, 10, 6, 10)
+            .expect("wall should be placed");
+
+        let removed = simulator.remove_all();
+
+        assert_eq!(removed, (2, 1));
+        assert!(simulator.buildings().is_empty());
+        assert!(simulator.walls().is_empty());
+        assert!(simulator.distances().is_empty());
+        assert!(simulator.worker_distances().is_empty());
+        assert!(!simulator.is_cell_occupied(2, 2));
+        assert!(!simulator.is_cell_occupied(2, 10));
+    }
+
+    #[test]
     fn removing_wall_does_not_recalculate_workshop_entry_point() {
         let mut simulator = Simulator::new(40).expect("simulator should be created");
         simulator
@@ -887,7 +936,7 @@ mod tests {
             .find(|b| b.id == workshop_id)
             .expect("workshop should exist")
             .entry_point;
-        assert_eq!(before, Some(EntryPoint { x: 9, y: 12 }));
+        assert_eq!(before, Some(EntryPoint { x: 9, y: 11 }));
 
         let removed = simulator.remove_all_walls();
         assert_eq!(removed, 1);
@@ -898,7 +947,7 @@ mod tests {
             .find(|b| b.id == workshop_id)
             .expect("workshop should exist")
             .entry_point;
-        assert_eq!(after, Some(EntryPoint { x: 9, y: 12 }));
+        assert_eq!(after, Some(EntryPoint { x: 9, y: 11 }));
     }
 
     #[test]

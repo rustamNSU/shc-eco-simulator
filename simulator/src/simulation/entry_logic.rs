@@ -107,11 +107,12 @@ fn default_entry_cell_rotated(
     let xi = x as i32;
     let yi = y as i32;
     let ni = size as i32;
+    let mirrored_offset = ni - 1 - offset;
 
     match rotation_steps % 4 {
         0 => Some((xi + offset, yi - 1)),
-        1 => Some((xi - 1, yi + offset)),
-        2 => Some((xi + offset, yi + ni)),
+        1 => Some((xi - 1, yi + mirrored_offset)),
+        2 => Some((xi + mirrored_offset, yi + ni)),
         _ => Some((xi + ni, yi + offset)),
     }
 }

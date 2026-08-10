@@ -20,7 +20,10 @@ pub enum BackendCommand {
         x: usize,
         y: usize,
     },
+    RemoveAll,
     RemoveAllWalls,
+    Undo,
+    Redo,
     SetStockpileResource {
         x: usize,
         y: usize,
@@ -91,6 +94,7 @@ fn run_backend(
             return;
         }
     };
+    let mut history = MapHistory::default();
 
     for command in receiver {
         let (message, cycle_rows) = match command {
@@ -98,67 +102,134 @@ fn run_backend(
                 building_type,
                 x,
                 y,
-            } => (
-                match simulator.place_building(building_type, x, y) {
-                    Ok(id) => format!(
-                        "Placed {} #{} at ({}, {})",
-                        building_type.display_name(),
-                        id,
-                        x,
-                        y
-                    ),
-                    Err(error) => format!("Placement failed: {}", error),
-                },
-                None,
-            ),
-            BackendCommand::PlaceWall { start, end } => (
-                match simulator.place_wall(start.0, start.1, end.0, end.1) {
-                    Ok(id) => format!(
-                        "Placed Wall #{} from ({}, {}) to ({}, {})",
-                        id, start.0, start.1, end.0, end.1
-                    ),
-                    Err(error) => format!("Placement failed: {}", error),
-                },
-                None,
-            ),
-            BackendCommand::RemoveAt { x, y } => (
-                match simulator.remove_at(x, y) {
-                    RemoveOutcome::None => "Nothing to remove at this cell".to_string(),
-                    RemoveOutcome::Wall { id } => format!("Removed Wall #{}", id),
-                    RemoveOutcome::Buildings {
-                        removed_ids,
-                        goods_yard_group_id,
-                    } => {
-                        if removed_ids.is_empty() {
-                            "Nothing removed".to_string()
-                        } else if let Some(group_id) = goods_yard_group_id {
+            } => {
+                let previous = simulator.clone();
+                (
+                    match simulator.place_building(building_type, x, y) {
+                        Ok(id) => {
+                            history.record(previous);
                             format!(
-                                "Removed Goods Yard group #{} ({} stockpiles)",
-                                group_id,
-                                removed_ids.len()
+                                "Placed {} #{} at ({}, {})",
+                                building_type.display_name(),
+                                id,
+                                x,
+                                y
                             )
-                        } else {
-                            format!("Removed building #{}", removed_ids[0])
                         }
-                    }
+                        Err(error) => format!("Placement failed: {}", error),
+                    },
+                    None,
+                )
+            }
+            BackendCommand::PlaceWall { start, end } => {
+                let previous = simulator.clone();
+                (
+                    match simulator.place_wall(start.0, start.1, end.0, end.1) {
+                        Ok(id) => {
+                            history.record(previous);
+                            format!(
+                                "Placed Wall #{} from ({}, {}) to ({}, {})",
+                                id, start.0, start.1, end.0, end.1
+                            )
+                        }
+                        Err(error) => format!("Placement failed: {}", error),
+                    },
+                    None,
+                )
+            }
+            BackendCommand::RemoveAt { x, y } => {
+                let previous = simulator.clone();
+                let outcome = simulator.remove_at(x, y);
+                if outcome != RemoveOutcome::None {
+                    history.record(previous);
+                }
+                (
+                    match outcome {
+                        RemoveOutcome::None => "Nothing to remove at this cell".to_string(),
+                        RemoveOutcome::Wall { id } => format!("Removed Wall #{}", id),
+                        RemoveOutcome::Buildings {
+                            removed_ids,
+                            goods_yard_group_id,
+                        } => {
+                            if removed_ids.is_empty() {
+                                "Nothing removed".to_string()
+                            } else if let Some(group_id) = goods_yard_group_id {
+                                format!(
+                                    "Removed Goods Yard group #{} ({} stockpiles)",
+                                    group_id,
+                                    removed_ids.len()
+                                )
+                            } else {
+                                format!("Removed building #{}", removed_ids[0])
+                            }
+                        }
+                    },
+                    None,
+                )
+            }
+            BackendCommand::RemoveAll => {
+                let previous = simulator.clone();
+                let (building_count, wall_count) = simulator.remove_all();
+                if building_count > 0 || wall_count > 0 {
+                    history.record(previous);
+                }
+                (
+                    {
+                        if building_count == 0 && wall_count == 0 {
+                            "Map is already empty".to_string()
+                        } else {
+                            format!(
+                                "Removed {} building(s) and {} wall segment(s)",
+                                building_count, wall_count
+                            )
+                        }
+                    },
+                    None,
+                )
+            }
+            BackendCommand::RemoveAllWalls => {
+                let previous = simulator.clone();
+                let removed = simulator.remove_all_walls();
+                if removed > 0 {
+                    history.record(previous);
+                }
+                (
+                    {
+                        if removed == 0 {
+                            "No walls to remove".to_string()
+                        } else {
+                            format!("Removed {} wall segment(s)", removed)
+                        }
+                    },
+                    None,
+                )
+            }
+            BackendCommand::SetStockpileResource { x, y, resource } => {
+                let previous = simulator.clone();
+                (
+                    match simulator.set_stockpile_resource_at(x, y, resource) {
+                        Ok(id) => {
+                            history.record(previous);
+                            format!("Marked stockpile #{} as {}", id, resource.display_name())
+                        }
+                        Err(error) => format!("Placement failed: {}", error),
+                    },
+                    None,
+                )
+            }
+            BackendCommand::Undo => (
+                if history.undo(&mut simulator) {
+                    "Undid last map change".to_string()
+                } else {
+                    "Nothing to undo".to_string()
                 },
                 None,
             ),
-            BackendCommand::RemoveAllWalls => (
-                {
-                    let removed = simulator.remove_all_walls();
-                    if removed == 0 {
-                        "No walls to remove".to_string()
-                    } else {
-                        format!("Removed {} wall segment(s)", removed)
-                    }
-                },
-                None,
-            ),
-            BackendCommand::SetStockpileResource { x, y, resource } => (
-                match simulator.set_stockpile_resource_at(x, y, resource) {
-                    Ok(id) => format!("Marked stockpile #{} as {}", id, resource.display_name()),
-                    Err(error) => format!("Placement failed: {}", error),
+            BackendCommand::Redo => (
+                if history.redo(&mut simulator) {
+                    "Redid map change".to_string()
+                } else {
+                    "Nothing to redo".to_string()
                 },
                 None,
             ),
@@ -185,6 +256,37 @@ fn run_backend(
             message,
             cycle_rows,
         });
+    }
+}
+
+#[derive(Default)]
+struct MapHistory {
+    undo: Vec<Simulator>,
+    redo: Vec<Simulator>,
+}
+
+impl MapHistory {
+    fn record(&mut self, previous: Simulator) {
+        self.undo.push(previous);
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, simulator: &mut Simulator) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+
+        self.redo.push(std::mem::replace(simulator, previous));
+        true
+    }
+
+    fn redo(&mut self, simulator: &mut Simulator) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+
+        self.undo.push(std::mem::replace(simulator, next));
+        true
     }
 }
 
@@ -305,5 +407,56 @@ fn build_cycle_row(
         wood_per_cycle: recipe.wood_required,
         iron_per_cycle: recipe.iron_required,
         error: Some(first_error.unwrap_or_else(|| "No reachable cycle".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use simulator::{BuildingType, EntryPoint, Simulator};
+
+    use super::MapHistory;
+
+    #[test]
+    fn history_restores_complete_map_snapshots_and_clears_redo_after_edit() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        let mut history = MapHistory::default();
+
+        let previous = simulator.clone();
+        simulator
+            .place_wall(14, 10, 14, 13)
+            .expect("wall should be placed");
+        history.record(previous);
+
+        let previous = simulator.clone();
+        simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 10)
+            .expect("workshop should be placed");
+        history.record(previous);
+
+        let expected_entry = Some(EntryPoint { x: 9, y: 11 });
+        assert_eq!(simulator.buildings()[0].entry_point, expected_entry);
+
+        let previous = simulator.clone();
+        simulator.remove_all();
+        history.record(previous);
+
+        assert!(history.undo(&mut simulator));
+        assert_eq!(simulator.walls().len(), 1);
+        assert_eq!(simulator.buildings()[0].entry_point, expected_entry);
+
+        assert!(history.undo(&mut simulator));
+        assert_eq!(simulator.walls().len(), 1);
+        assert!(simulator.buildings().is_empty());
+
+        assert!(history.redo(&mut simulator));
+        assert_eq!(simulator.buildings()[0].entry_point, expected_entry);
+
+        let previous = simulator.clone();
+        simulator
+            .place_building(BuildingType::Armoury, 20, 20)
+            .expect("armoury should be placed");
+        history.record(previous);
+
+        assert!(!history.redo(&mut simulator));
     }
 }

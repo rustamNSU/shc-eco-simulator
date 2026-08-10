@@ -138,6 +138,57 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
+    let state_for_remove_all = Arc::clone(&state);
+    let backend_for_remove_all = backend.clone();
+    window.on_remove_all(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_remove_all
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.clear_pending_wall();
+            let message = match backend_for_remove_all.send(BackendCommand::RemoveAll) {
+                Ok(()) => "Processing...".to_string(),
+                Err(error) => error,
+            };
+            refresh_view(&window, &state, &message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_undo = Arc::clone(&state);
+    let backend_for_undo = backend.clone();
+    window.on_undo(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_undo
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.clear_pending_wall();
+            let message = match backend_for_undo.send(BackendCommand::Undo) {
+                Ok(()) => "Processing undo...".to_string(),
+                Err(error) => error,
+            };
+            refresh_view(&window, &state, &message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_redo = Arc::clone(&state);
+    let backend_for_redo = backend.clone();
+    window.on_redo(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_redo
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.clear_pending_wall();
+            let message = match backend_for_redo.send(BackendCommand::Redo) {
+                Ok(()) => "Processing redo...".to_string(),
+                Err(error) => error,
+            };
+            refresh_view(&window, &state, &message);
+        }
+    });
+
+    let weak_window = window.as_weak();
     let state_for_fletcher = Arc::clone(&state);
     let backend_for_fletcher = backend.clone();
     window.on_set_optimize_fletcher_routing(move |enabled| {
@@ -440,6 +491,7 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     window.set_buy_iron(state.buy_iron());
     window.set_eco_setup_cost(build_eco_setup_summary(state).into());
     window.set_workshop_count_summary(build_workshop_count_summary(state).into());
+    window.set_armoury_summary(build_armoury_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -568,6 +620,27 @@ fn build_workshop_count_summary(state: &EditorState) -> String {
         count(BuildingType::ArmourersWorkshop),
         count(BuildingType::Armoury)
     )
+}
+
+fn build_armoury_summary(state: &EditorState) -> String {
+    let armouries = state
+        .simulator()
+        .buildings()
+        .iter()
+        .filter(|building| building.building_type == BuildingType::Armoury)
+        .collect::<Vec<_>>();
+
+    if armouries.is_empty() {
+        return "Armoury production\nNo armoury placed".to_string();
+    }
+
+    let mut sections = Vec::with_capacity(armouries.len());
+    for armoury in armouries {
+        let (title, _, lines) = build_armoury_hover_info(state, armoury.id);
+        sections.push(format!("{}\n{}", title, lines.join("\n")));
+    }
+
+    format!("Armoury production\n{}", sections.join("\n\n"))
 }
 
 fn net_gold_per_cycle(row: &crate::backend::CycleSimulationRow, state: &EditorState) -> f64 {
