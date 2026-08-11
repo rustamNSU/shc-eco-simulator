@@ -10,6 +10,8 @@ enum SelectedTool {
     Remove,
     SetWoodStock,
     SetIronStock,
+    SetWheatStock,
+    SetFlourStock,
 }
 
 pub enum PlacementOutcome {
@@ -59,6 +61,8 @@ impl EditorState {
             Some(SelectedTool::Remove) => Some("remove"),
             Some(SelectedTool::SetWoodStock) => Some("set_wood_stock"),
             Some(SelectedTool::SetIronStock) => Some("set_iron_stock"),
+            Some(SelectedTool::SetWheatStock) => Some("set_wheat_stock"),
+            Some(SelectedTool::SetFlourStock) => Some("set_flour_stock"),
             None => None,
         }
     }
@@ -86,6 +90,16 @@ impl EditorState {
             return true;
         }
 
+        if value == "set_wheat_stock" {
+            self.selected = Some(SelectedTool::SetWheatStock);
+            return true;
+        }
+
+        if value == "set_flour_stock" {
+            self.selected = Some(SelectedTool::SetFlourStock);
+            return true;
+        }
+
         if let Some(building) = BuildingType::from_id(value) {
             if building == BuildingType::Stockpile {
                 return false;
@@ -104,6 +118,8 @@ impl EditorState {
             Some(SelectedTool::Remove) => "Remove",
             Some(SelectedTool::SetWoodStock) => "Set Wood Stock",
             Some(SelectedTool::SetIronStock) => "Set Iron Stock",
+            Some(SelectedTool::SetWheatStock) => "Set Wheat Stock",
+            Some(SelectedTool::SetFlourStock) => "Set Flour Stock",
             None => "None",
         }
     }
@@ -160,6 +176,12 @@ impl EditorState {
             Some(SelectedTool::SetIronStock) => {
                 self.mark_stockpile(ux, uy, StockpileResource::Iron)
             }
+            Some(SelectedTool::SetWheatStock) => {
+                self.mark_stockpile(ux, uy, StockpileResource::Wheat)
+            }
+            Some(SelectedTool::SetFlourStock) => {
+                self.mark_stockpile(ux, uy, StockpileResource::Flour)
+            }
             None => Err("no tool selected".to_string()),
         }
     }
@@ -199,6 +221,12 @@ impl EditorState {
         self.simulation_settings
     }
 
+    pub fn set_simulation_settings(&mut self, settings: SimulationSettings) {
+        self.simulation_settings = settings;
+        self.cycle_rows.clear();
+        self.wall_start = None;
+    }
+
     pub fn game_speed(&self) -> u32 {
         self.simulation_settings.game_speed_ticks_per_second
     }
@@ -213,6 +241,14 @@ impl EditorState {
 
     pub fn buy_iron(&self) -> bool {
         self.simulation_settings.buy_iron
+    }
+
+    pub fn buy_wheat(&self) -> bool {
+        self.simulation_settings.buy_wheat
+    }
+
+    pub fn buy_flour(&self) -> bool {
+        self.simulation_settings.buy_flour
     }
 
     pub fn optimized_fletcher_routing(&self) -> bool {
@@ -254,6 +290,24 @@ impl EditorState {
         }
 
         self.simulation_settings.buy_iron = enabled;
+        true
+    }
+
+    pub fn set_buy_wheat(&mut self, enabled: bool) -> bool {
+        if self.simulation_settings.buy_wheat == enabled {
+            return false;
+        }
+
+        self.simulation_settings.buy_wheat = enabled;
+        true
+    }
+
+    pub fn set_buy_flour(&mut self, enabled: bool) -> bool {
+        if self.simulation_settings.buy_flour == enabled {
+            return false;
+        }
+
+        self.simulation_settings.buy_flour = enabled;
         true
     }
 
@@ -396,7 +450,9 @@ impl EditorState {
             }
             Some(SelectedTool::Remove)
             | Some(SelectedTool::SetWoodStock)
-            | Some(SelectedTool::SetIronStock) => vec![(anchor_x, anchor_y)],
+            | Some(SelectedTool::SetIronStock)
+            | Some(SelectedTool::SetWheatStock)
+            | Some(SelectedTool::SetFlourStock) => vec![(anchor_x, anchor_y)],
             None => Vec::new(),
         }
     }

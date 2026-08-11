@@ -10,7 +10,8 @@ const WORKSHOP_BASE_OUTPUT_RING: [u32; WORKSHOP_FEAR_RING_LEN] = [1, 2, 1, 2, 1,
 pub const WOOD_BUY_GOLD: u32 = 4;
 pub const IRON_BUY_GOLD: u32 = 45;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WeaponType {
     Bow,
     Crossbow,
@@ -124,12 +125,15 @@ impl WeaponRecipe {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SimulationSettings {
     pub game_speed_ticks_per_second: u32,
     pub fear_factor: i32,
     pub buy_wood: bool,
     pub buy_iron: bool,
+    pub buy_wheat: bool,
+    pub buy_flour: bool,
     pub optimized_fletcher_routing: bool,
     pub fletchers_weapon: WeaponType,
     pub poleturners_weapon: WeaponType,
@@ -143,6 +147,8 @@ impl Default for SimulationSettings {
             fear_factor: 0,
             buy_wood: true,
             buy_iron: true,
+            buy_wheat: false,
+            buy_flour: false,
             optimized_fletcher_routing: false,
             fletchers_weapon: WeaponType::Bow,
             poleturners_weapon: WeaponType::Spear,

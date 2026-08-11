@@ -24,6 +24,9 @@ pub enum BackendCommand {
     RemoveAllWalls,
     Undo,
     Redo,
+    LoadProject {
+        simulator: Simulator,
+    },
     SetStockpileResource {
         x: usize,
         y: usize,
@@ -233,6 +236,13 @@ fn run_backend(
                 },
                 None,
             ),
+            BackendCommand::LoadProject {
+                simulator: loaded_simulator,
+            } => {
+                simulator = loaded_simulator;
+                history = MapHistory::default();
+                ("Project opened".to_string(), Some(Vec::new()))
+            }
             BackendCommand::RunCycleSimulation { settings } => {
                 simulator.calculate_worker_distances();
                 let cycle_rows = build_cycle_simulation_rows(&simulator, settings);

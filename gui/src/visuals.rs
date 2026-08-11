@@ -13,6 +13,10 @@ pub fn building_color(building_type: BuildingType) -> slint::Color {
         BuildingType::BlacksmithsWorkshop => slint::Color::from_rgb_u8(74, 74, 74),
         BuildingType::PoleturnersWorkshop => slint::Color::from_rgb_u8(175, 145, 86),
         BuildingType::ArmourersWorkshop => slint::Color::from_rgb_u8(151, 111, 171),
+        BuildingType::WheatFarm => slint::Color::from_rgb_u8(194, 174, 76),
+        BuildingType::Windmill => slint::Color::from_rgb_u8(164, 155, 138),
+        BuildingType::Bakery => slint::Color::from_rgb_u8(190, 119, 66),
+        BuildingType::Granary => slint::Color::from_rgb_u8(137, 92, 58),
     }
 }
 
@@ -22,6 +26,14 @@ pub fn build_occupied_cells(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
     for building in simulator.buildings() {
         let color = building_color(building.building_type);
         for (x, y) in building.occupied_cells() {
+            let color = if building.building_type == BuildingType::WheatFarm
+                && x < building.x + 3
+                && y >= building.y + 6
+            {
+                slint::Color::from_rgb_u8(132, 92, 55)
+            } else {
+                color
+            };
             cells.push(OccupiedCellVisual {
                 x: x as i32,
                 y: y as i32,
@@ -275,6 +287,8 @@ fn stockpile_resource_color(resource: StockpileResource) -> slint::Color {
     match resource {
         StockpileResource::Wood => slint::Color::from_argb_u8(210, 196, 150, 92),
         StockpileResource::Iron => slint::Color::from_argb_u8(210, 170, 170, 178),
+        StockpileResource::Wheat => slint::Color::from_argb_u8(210, 212, 184, 73),
+        StockpileResource::Flour => slint::Color::from_argb_u8(210, 232, 224, 196),
     }
 }
 

@@ -16,6 +16,10 @@ pub(crate) fn calculate_building_entry(
         return None;
     }
 
+    if building_type == BuildingType::WheatFarm {
+        return Some(EntryPoint { x: x + 4, y: y + 3 });
+    }
+
     let rotation_steps = if is_workshop(building_type) {
         workshop_wall_rotation_steps(walls, x, y, size)
     } else {
@@ -50,7 +54,7 @@ fn first_available(map: &CellMap, cells: Vec<(i32, i32)>) -> Option<EntryPoint> 
 
         let ux = cx as usize;
         let uy = cy as usize;
-        if map.is_in_bounds(ux, uy) && !map.is_occupied(ux, uy) {
+        if map.is_in_bounds(ux, uy) && !map.is_blocked(ux, uy) {
             return Some(EntryPoint { x: ux, y: uy });
         }
     }
@@ -209,5 +213,6 @@ fn is_workshop(building_type: BuildingType) -> bool {
             | BuildingType::BlacksmithsWorkshop
             | BuildingType::PoleturnersWorkshop
             | BuildingType::ArmourersWorkshop
+            | BuildingType::Bakery
     )
 }

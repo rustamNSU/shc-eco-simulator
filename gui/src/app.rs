@@ -1,24 +1,38 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
-use simulator::{BuildingType, WOOD_BUY_GOLD, WeaponType};
+use simulator::{
+    BREAD_SELL_GOLD, BuildingType, FLOUR_BUY_GOLD, FLOUR_SELL_GOLD, WHEAT_BUY_GOLD,
+    WHEAT_SELL_GOLD, WOOD_BUY_GOLD, WeaponType,
+};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::{
     MainWindow, SimulationCycleItem, SimulationInfoLine,
     backend::{BackendCommand, BackendHandle, BackendUpdate},
     editor_state::{EditorState, PlacementOutcome},
+    project_files::ProjectSession,
     visuals,
 };
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let window = MainWindow::new()?;
     let state = Arc::new(Mutex::new(EditorState::new()?));
+    let project_session = Arc::new(Mutex::new(ProjectSession::new()));
 
     {
         let state = state
             .lock()
             .expect("editor state lock should not be poisoned");
         refresh_view(&window, &state, "Ready");
+    }
+    {
+        let session = project_session
+            .lock()
+            .expect("project session lock should not be poisoned");
+        refresh_project_file_view(&window, &session);
     }
 
     let backend_window = window.as_weak();
@@ -42,6 +56,64 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
         },
     )?;
+
+    let weak_window = window.as_weak();
+    let state_for_save = Arc::clone(&state);
+    let session_for_save = Arc::clone(&project_session);
+    window.on_save_project(move || {
+        if let Some(window) = weak_window.upgrade() {
+            save_project(&window, &state_for_save, &session_for_save, false);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_save_as = Arc::clone(&state);
+    let session_for_save_as = Arc::clone(&project_session);
+    window.on_save_project_as(move || {
+        if let Some(window) = weak_window.upgrade() {
+            save_project(&window, &state_for_save_as, &session_for_save_as, true);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_open = Arc::clone(&state);
+    let session_for_open = Arc::clone(&project_session);
+    let backend_for_open = backend.clone();
+    window.on_open_project(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let result = session_for_open
+                .lock()
+                .expect("project session lock should not be poisoned")
+                .open_dialog();
+            handle_open_result(
+                &window,
+                &state_for_open,
+                &session_for_open,
+                &backend_for_open,
+                result,
+            );
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_recent = Arc::clone(&state);
+    let session_for_recent = Arc::clone(&project_session);
+    let backend_for_recent = backend.clone();
+    window.on_open_recent_project(move || {
+        if let Some(window) = weak_window.upgrade() {
+            let result = session_for_recent
+                .lock()
+                .expect("project session lock should not be poisoned")
+                .open_latest_recent();
+            handle_open_result(
+                &window,
+                &state_for_recent,
+                &session_for_recent,
+                &backend_for_recent,
+                result,
+            );
+        }
+    });
 
     let weak_window = window.as_weak();
     let state_for_select = Arc::clone(&state);
@@ -312,6 +384,32 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
+    let state_for_buy_wheat = Arc::clone(&state);
+    window.on_set_buy_wheat(move |enabled| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_buy_wheat
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            let changed = state.set_buy_wheat(enabled);
+            let message = buy_setting_message("Wheat", enabled, changed);
+            refresh_view(&window, &state, message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_buy_flour = Arc::clone(&state);
+    window.on_set_buy_flour(move |enabled| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_buy_flour
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            let changed = state.set_buy_flour(enabled);
+            let message = buy_setting_message("Flour", enabled, changed);
+            refresh_view(&window, &state, message);
+        }
+    });
+
+    let weak_window = window.as_weak();
     let state_for_tooltips = Arc::clone(&state);
     window.on_set_simulation_tooltips_enabled(move |enabled| {
         if let Some(window) = weak_window.upgrade() {
@@ -425,6 +523,113 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn save_project(
+    window: &MainWindow,
+    state: &Arc<Mutex<EditorState>>,
+    project_session: &Arc<Mutex<ProjectSession>>,
+    save_as: bool,
+) {
+    let project = {
+        let state = state
+            .lock()
+            .expect("editor state lock should not be poisoned");
+        simulator::ProjectFile::capture(state.simulator(), state.simulation_settings())
+    };
+
+    let mut session = project_session
+        .lock()
+        .expect("project session lock should not be poisoned");
+    let result = if save_as {
+        session.save_as(&project)
+    } else {
+        session.save(&project)
+    };
+
+    let message = match result {
+        Ok(Some(path)) => format!("Saved {}", display_file_name(&path)),
+        Ok(None) => "Save canceled".to_string(),
+        Err(error) => format!("Save failed: {error}"),
+    };
+    refresh_project_file_view(window, &session);
+    window.set_status_text(message.into());
+}
+
+fn handle_open_result(
+    window: &MainWindow,
+    state: &Arc<Mutex<EditorState>>,
+    project_session: &Arc<Mutex<ProjectSession>>,
+    backend: &BackendHandle,
+    result: Result<Option<(simulator::ProjectFile, PathBuf)>, String>,
+) {
+    let Some((project, path)) = (match result {
+        Ok(project) => project,
+        Err(error) => {
+            window.set_status_text(format!("Open failed: {error}").into());
+            return;
+        }
+    }) else {
+        window.set_status_text("Open canceled".into());
+        return;
+    };
+
+    let (simulator, settings) = match project.into_simulator() {
+        Ok(project) => project,
+        Err(error) => {
+            window.set_status_text(format!("Open failed: {error}").into());
+            return;
+        }
+    };
+
+    if let Err(error) = backend.send(BackendCommand::LoadProject { simulator }) {
+        window.set_status_text(format!("Open failed: {error}").into());
+        return;
+    }
+
+    {
+        let mut state = state
+            .lock()
+            .expect("editor state lock should not be poisoned");
+        state.set_simulation_settings(settings);
+        state.clear_selection();
+        refresh_view(window, &state, "Opening project...");
+    }
+
+    let file_name = display_file_name(&path);
+    let mut session = project_session
+        .lock()
+        .expect("project session lock should not be poisoned");
+    let recent_result = session.mark_opened(path);
+    refresh_project_file_view(window, &session);
+    let message = match recent_result {
+        Ok(()) => format!("Opened {file_name}"),
+        Err(error) => format!("Opened {file_name}; recent list was not saved: {error}"),
+    };
+    window.set_status_text(message.into());
+}
+
+fn refresh_project_file_view(window: &MainWindow, session: &ProjectSession) {
+    window.set_current_project_name(session.current_name().into());
+    window.set_recent_project_name(session.latest_recent_name().into());
+}
+
+fn display_file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn buy_setting_message(resource: &str, enabled: bool, changed: bool) -> &'static str {
+    match (resource, enabled, changed) {
+        ("Wheat", true, true) => "Buy Wheat enabled",
+        ("Wheat", false, true) => "Buy Wheat disabled",
+        ("Wheat", _, false) => "Buy Wheat unchanged",
+        ("Flour", true, true) => "Buy Flour enabled",
+        ("Flour", false, true) => "Buy Flour disabled",
+        ("Flour", _, false) => "Buy Flour unchanged",
+        _ => "Buy setting unchanged",
+    }
+}
+
 fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     window.set_status_text(status.into());
     refresh_static_view(window, state);
@@ -441,8 +646,11 @@ fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     window.set_fear_factor(state.fear_factor());
     window.set_buy_wood(state.buy_wood());
     window.set_buy_iron(state.buy_iron());
+    window.set_buy_wheat(state.buy_wheat());
+    window.set_buy_flour(state.buy_flour());
     window.set_eco_setup_cost(build_eco_setup_summary(state).into());
     window.set_workshop_count_summary(build_workshop_count_summary(state).into());
+    window.set_bread_count_summary(build_bread_count_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
@@ -489,8 +697,11 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     window.set_fear_factor(state.fear_factor());
     window.set_buy_wood(state.buy_wood());
     window.set_buy_iron(state.buy_iron());
+    window.set_buy_wheat(state.buy_wheat());
+    window.set_buy_flour(state.buy_flour());
     window.set_eco_setup_cost(build_eco_setup_summary(state).into());
     window.set_workshop_count_summary(build_workshop_count_summary(state).into());
+    window.set_bread_count_summary(build_bread_count_summary(state).into());
     window.set_armoury_summary(build_armoury_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
@@ -622,6 +833,25 @@ fn build_workshop_count_summary(state: &EditorState) -> String {
     )
 }
 
+fn build_bread_count_summary(state: &EditorState) -> String {
+    let count = |building_type| {
+        state
+            .simulator()
+            .buildings()
+            .iter()
+            .filter(|building| building.building_type == building_type)
+            .count()
+    };
+
+    format!(
+        "Bread economy\nWheat Farms: {}\nWind Mills: {}\nBakeries: {}\nGranaries: {}",
+        count(BuildingType::WheatFarm),
+        count(BuildingType::Windmill),
+        count(BuildingType::Bakery),
+        count(BuildingType::Granary)
+    )
+}
+
 fn build_armoury_summary(state: &EditorState) -> String {
     let armouries = state
         .simulator()
@@ -630,17 +860,81 @@ fn build_armoury_summary(state: &EditorState) -> String {
         .filter(|building| building.building_type == BuildingType::Armoury)
         .collect::<Vec<_>>();
 
-    if armouries.is_empty() {
-        return "Armoury production\nNo armoury placed".to_string();
+    let armoury_text = if armouries.is_empty() {
+        "Armoury production\nNo armoury placed".to_string()
+    } else {
+        let mut sections = Vec::with_capacity(armouries.len());
+        for armoury in armouries {
+            let (title, _, lines) = build_armoury_hover_info(state, armoury.id);
+            sections.push(format!("{}\n{}", title, lines.join("\n")));
+        }
+        format!("Armoury production\n{}", sections.join("\n\n"))
+    };
+
+    format!("{}\n\n{}", armoury_text, build_bread_summary(state))
+}
+
+fn build_bread_summary(state: &EditorState) -> String {
+    let report = state
+        .simulator()
+        .calculate_bread_economy(state.simulation_settings());
+    let mut lines = vec!["Bread production".to_string()];
+    lines.extend(bread_economy_lines(&report));
+
+    if !report.issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Issues:".to_string());
+        lines.extend(report.issues);
     }
 
-    let mut sections = Vec::with_capacity(armouries.len());
-    for armoury in armouries {
-        let (title, _, lines) = build_armoury_hover_info(state, armoury.id);
-        sections.push(format!("{}\n{}", title, lines.join("\n")));
-    }
+    lines.join("\n")
+}
 
-    format!("Armoury production\n{}", sections.join("\n\n"))
+fn bread_economy_lines(report: &simulator::BreadEconomyReport) -> Vec<String> {
+    let mut lines = vec![
+        format!("Wheat produced / min: {:.2}", report.wheat_per_minute),
+        format!(
+            "Wheat surplus / min: {:.2}",
+            report.surplus_wheat_per_minute
+        ),
+    ];
+    if report.purchased_wheat_per_minute > 0.0 {
+        lines.push(format!(
+            "Wheat bought / min: {:.2}",
+            report.purchased_wheat_per_minute
+        ));
+    }
+    lines.extend([
+        format!("Flour produced / min: {:.2}", report.flour_per_minute),
+        format!(
+            "Flour surplus / min: {:.2}",
+            report.surplus_flour_per_minute
+        ),
+    ]);
+    if report.purchased_flour_per_minute > 0.0 {
+        lines.push(format!(
+            "Flour bought / min: {:.2}",
+            report.purchased_flour_per_minute
+        ));
+    }
+    lines.extend([
+        format!("Bread produced / min: {:.2}", report.bread_per_minute),
+        format!(
+            "Bread sell gold / min: {:.2}",
+            report.bread_per_minute * BREAD_SELL_GOLD
+        ),
+    ]);
+    let buy_gold = bread_input_buy_gold_per_minute(report);
+    if buy_gold > 0.0 {
+        lines.push(format!("Input buy gold / min: {:.2}", buy_gold));
+    }
+    lines.push(format!(
+        "Total gold / min: {:.2}",
+        bread_economy_gold_per_minute(report)
+    ));
+    lines.push(format!("Bottleneck: {}", report.limiting_stage));
+
+    lines
 }
 
 fn net_gold_per_cycle(row: &crate::backend::CycleSimulationRow, state: &EditorState) -> f64 {
@@ -674,11 +968,87 @@ fn build_hover_simulation_info(state: &EditorState) -> (String, String, Vec<Stri
             build_workshop_hover_info(state, building.id, building.building_type.display_name())
         }
         simulator::BuildingType::Armoury => build_armoury_hover_info(state, building.id),
+        simulator::BuildingType::WheatFarm
+        | simulator::BuildingType::Windmill
+        | simulator::BuildingType::Bakery
+        | simulator::BuildingType::Granary => build_bread_hover_info(state, building),
         simulator::BuildingType::Stockpile => {
             build_stockpile_hover_info(state, building.id, building.stockpile_resource)
         }
         _ => (String::new(), String::new(), Vec::new()),
     }
+}
+
+fn build_bread_hover_info(
+    state: &EditorState,
+    building: &simulator::BuildingPlacement,
+) -> (String, String, Vec<String>) {
+    let report = state
+        .simulator()
+        .calculate_bread_economy(state.simulation_settings());
+    let lines = match building.building_type {
+        simulator::BuildingType::WheatFarm => report
+            .farm_rates
+            .iter()
+            .find(|rate| rate.building_id == building.id)
+            .map_or_else(
+                || vec!["No reachable Wheat stockpile route".to_string()],
+                |rate| goods_output_lines("Wheat", rate.actual_per_minute, WHEAT_SELL_GOLD),
+            ),
+        simulator::BuildingType::Windmill => report
+            .mill_rates
+            .iter()
+            .find(|rate| rate.building_id == building.id)
+            .map_or_else(
+                || vec!["No reachable Wheat/Flour stockpile route".to_string()],
+                |rate| goods_output_lines("Flour", rate.actual_per_minute, FLOUR_SELL_GOLD),
+            ),
+        simulator::BuildingType::Bakery => report
+            .bakery_rates
+            .iter()
+            .find(|rate| rate.building_id == building.id)
+            .map_or_else(
+                || vec!["No reachable Flour stockpile and Granary route".to_string()],
+                |rate| {
+                    goods_output_lines(
+                        "Bread",
+                        rate.actual_per_minute * report.bread_per_flour,
+                        BREAD_SELL_GOLD,
+                    )
+                },
+            ),
+        simulator::BuildingType::Granary => bread_economy_lines(&report),
+        _ => Vec::new(),
+    };
+
+    (
+        format!("#{} {}", building.id, building.building_type.display_name()),
+        String::new(),
+        lines,
+    )
+}
+
+fn goods_output_lines(goods_name: &str, actual_per_minute: f64, sell_gold: f64) -> Vec<String> {
+    vec![
+        format!("{} produced / min: {:.2}", goods_name, actual_per_minute),
+        format!(
+            "{} sell gold / min: {:.2}",
+            goods_name,
+            actual_per_minute * sell_gold
+        ),
+    ]
+}
+
+fn bread_economy_gold_per_minute(report: &simulator::BreadEconomyReport) -> f64 {
+    report.surplus_wheat_per_minute * WHEAT_SELL_GOLD
+        + report.surplus_flour_per_minute * FLOUR_SELL_GOLD
+        + report.bread_per_minute * BREAD_SELL_GOLD
+        - bread_input_buy_gold_per_minute(report)
+}
+
+fn bread_input_buy_gold_per_minute(report: &simulator::BreadEconomyReport) -> f64 {
+    report.purchased_wheat_per_minute * WHEAT_BUY_GOLD
+        + report.purchased_flour_per_minute * FLOUR_BUY_GOLD
 }
 
 fn build_workshop_hover_info(
@@ -771,6 +1141,7 @@ fn build_stockpile_hover_info(
             let amount = match resource {
                 simulator::StockpileResource::Wood => row.wood_per_cycle,
                 simulator::StockpileResource::Iron => row.iron_per_cycle,
+                simulator::StockpileResource::Wheat | simulator::StockpileResource::Flour => 0,
             };
             if amount == 0 {
                 return None;
@@ -778,6 +1149,28 @@ fn build_stockpile_hover_info(
             Some(amount as f64 / total_ticks as f64)
         })
         .sum::<f64>();
+
+    let total_per_tick = match resource {
+        simulator::StockpileResource::Wheat => {
+            let report = state
+                .simulator()
+                .calculate_bread_economy(state.simulation_settings());
+            report.flour_per_minute / (state.game_speed() as f64 * 60.0)
+        }
+        simulator::StockpileResource::Flour => {
+            let report = state
+                .simulator()
+                .calculate_bread_economy(state.simulation_settings());
+            if report.bread_per_flour == 0.0 {
+                0.0
+            } else {
+                report.bread_per_minute
+                    / report.bread_per_flour
+                    / (state.game_speed() as f64 * 60.0)
+            }
+        }
+        _ => total_per_tick,
+    };
 
     let per_minute = total_per_tick * state.game_speed() as f64 * 60.0;
     let lines = vec![

@@ -10,7 +10,8 @@ pub struct BuildingCost {
     pub gold: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BuildingType {
     GoodsYard,
     Stockpile,
@@ -19,6 +20,10 @@ pub enum BuildingType {
     BlacksmithsWorkshop,
     PoleturnersWorkshop,
     ArmourersWorkshop,
+    WheatFarm,
+    Windmill,
+    Bakery,
+    Granary,
 }
 
 impl BuildingType {
@@ -31,6 +36,10 @@ impl BuildingType {
             Self::BlacksmithsWorkshop => "blacksmiths_workshop",
             Self::PoleturnersWorkshop => "poleturners_workshop",
             Self::ArmourersWorkshop => "armourers_workshop",
+            Self::WheatFarm => "wheat_farm",
+            Self::Windmill => "windmill",
+            Self::Bakery => "bakery",
+            Self::Granary => "granary",
         }
     }
 
@@ -43,6 +52,10 @@ impl BuildingType {
             Self::BlacksmithsWorkshop => "Blacksmiths Workshop",
             Self::PoleturnersWorkshop => "Poleturners Workshop",
             Self::ArmourersWorkshop => "Armourers Workshop",
+            Self::WheatFarm => "Wheat Farm",
+            Self::Windmill => "Wind Mill",
+            Self::Bakery => "Bakery",
+            Self::Granary => "Granary",
         }
     }
 
@@ -54,11 +67,15 @@ impl BuildingType {
             "blacksmiths_workshop" => Some(Self::BlacksmithsWorkshop),
             "poleturners_workshop" => Some(Self::PoleturnersWorkshop),
             "armourers_workshop" => Some(Self::ArmourersWorkshop),
+            "wheat_farm" => Some(Self::WheatFarm),
+            "windmill" => Some(Self::Windmill),
+            "bakery" => Some(Self::Bakery),
+            "granary" => Some(Self::Granary),
             _ => None,
         }
     }
 
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 10] {
         [
             Self::GoodsYard,
             Self::Armoury,
@@ -66,6 +83,10 @@ impl BuildingType {
             Self::BlacksmithsWorkshop,
             Self::PoleturnersWorkshop,
             Self::ArmourersWorkshop,
+            Self::WheatFarm,
+            Self::Windmill,
+            Self::Bakery,
+            Self::Granary,
         ]
     }
 
@@ -74,7 +95,9 @@ impl BuildingType {
             Self::FletchersWorkshop
             | Self::BlacksmithsWorkshop
             | Self::PoleturnersWorkshop
-            | Self::ArmourersWorkshop => Some(WORKSHOP_SLOWDOWN_BASE),
+            | Self::ArmourersWorkshop
+            | Self::Bakery => Some(WORKSHOP_SLOWDOWN_BASE),
+            Self::WheatFarm | Self::Windmill => Some(1),
             _ => None,
         }
     }
@@ -103,6 +126,10 @@ impl BuildingType {
                 wood: 20,
                 gold: 100,
             },
+            Self::WheatFarm => BuildingCost { wood: 15, gold: 0 },
+            Self::Windmill => BuildingCost { wood: 20, gold: 0 },
+            Self::Bakery => BuildingCost { wood: 10, gold: 0 },
+            Self::Granary => BuildingCost { wood: 5, gold: 0 },
         }
     }
 }
@@ -144,6 +171,22 @@ mod tests {
     }
 
     #[test]
+    fn bread_workers_use_supplied_movement_speeds() {
+        assert_eq!(BuildingType::WheatFarm.worker_slowdown_base(), Some(1));
+        assert_eq!(BuildingType::Windmill.worker_slowdown_base(), Some(1));
+        assert_eq!(BuildingType::Bakery.worker_slowdown_base(), Some(2));
+        assert_eq!(BuildingType::Granary.worker_slowdown_base(), None);
+        assert_eq!(
+            BuildingType::WheatFarm.worker_speed_cells_per_tick(),
+            Some(1.0 / 16.0)
+        );
+        assert_eq!(
+            BuildingType::Bakery.worker_speed_cells_per_tick(),
+            Some(1.0 / 24.0)
+        );
+    }
+
+    #[test]
     fn build_costs_match_domain_table() {
         assert_eq!(
             BuildingType::Armoury.build_cost(),
@@ -176,6 +219,22 @@ mod tests {
                 wood: 20,
                 gold: 100
             }
+        );
+        assert_eq!(
+            BuildingType::WheatFarm.build_cost(),
+            BuildingCost { wood: 15, gold: 0 }
+        );
+        assert_eq!(
+            BuildingType::Windmill.build_cost(),
+            BuildingCost { wood: 20, gold: 0 }
+        );
+        assert_eq!(
+            BuildingType::Bakery.build_cost(),
+            BuildingCost { wood: 10, gold: 0 }
+        );
+        assert_eq!(
+            BuildingType::Granary.build_cost(),
+            BuildingCost { wood: 5, gold: 0 }
         );
     }
 }

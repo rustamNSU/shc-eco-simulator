@@ -14,6 +14,7 @@ This repository has two crates:
 - [Current Status](#current-status)
 - [Product Vision](#product-vision)
 - [Documentation](#documentation)
+- [Project Files](#project-files)
 - [Domain Baseline](#domain-baseline)
   - [Map](#map)
   - [Building Placement](#building-placement)
@@ -44,6 +45,7 @@ Implemented now:
 - Building types and placement rules
 - Occupancy checks (cannot place on occupied cells)
 - Basic map editor UI with building palette and zoom controls
+- Portable JSON project save/load, Save As, and latest-recent-file support
 
 Planned next:
 
@@ -51,7 +53,6 @@ Planned next:
 - Worker travel and throughput logic
 - Time-step simulation loop
 - Plot/graph output after simulation runs
-- Save/load and scenario persistence
 
 ## Product Vision
 
@@ -68,6 +69,14 @@ The UI should let users quickly paint layouts, run simulation steps, and inspect
 Additional domain notes live in `doc/`.
 
 - [Unit movement speed](doc/unit_movement_speed.md) documents the tick formula, unit slowdown and speed-up coefficients, terrain slowdown modifiers, quick per-cell tick references, and a requested army-unit reference set with movement timings and damage data.
+
+## Project Files
+
+- `Open`, `Open Recent`, `Save`, and `Save As` are available above the map. Keyboard shortcuts are `Ctrl+O` and `Ctrl+S`.
+- New saves default to `%LOCALAPPDATA%\SHCEcoSimulator\Projects` on Windows, but the standard file dialog can save or open a shared `.json` file anywhere.
+- A project stores map geometry, building IDs and positions, goods-yard groups, stockpile resources, entry points, walls, and simulation settings such as selected weapons and resource-buy options.
+- Calculated paths, worker distances, production results, and tooltip statistics are not stored; they are regenerated after opening.
+- The recent-file list is stored in `%LOCALAPPDATA%\SHCEcoSimulator\recent.json`.
 
 ## Domain Baseline
 
@@ -103,8 +112,19 @@ Additional domain notes live in `doc/`.
 - `BlacksmithsWorkshop`
 - `PoleturnersWorkshop`
 - `ArmourersWorkshop`
+- `WheatFarm`
+- `Windmill`
+- `Bakery`
+- `Granary`
 
 Workshops and armoury currently use a 4x4 square footprint.
+
+Bread economy footprints:
+
+- Wheat Farm: 9x9 reserved area. Its 3x3 top-left cabin blocks paths; field cells are traversable.
+- Wind Mill: 3x3 with a fixed bottom-center entry.
+- Bakery: 4x4 and uses the same wall-controlled entry orientation as weapon workshops.
+- Granary: 4x4 with the same entry behavior as an Armoury.
 
 `GoodsYard` placement uses a 5x5 template area with four 2x2 corner stockpiles and a free center row/column cross.
 
@@ -121,6 +141,10 @@ Workshops and armoury currently use a 4x4 square footprint.
 | Blacksmiths Workshop   |    20     |     200   |
 | Poleturners Workshop   |    10     |     100   |
 | Armourers Workshop     |    20     |     100   |
+| Wheat Farm             |    15     |     0     |
+| Wind Mill              |    20     |     0     |
+| Bakery                 |    10     |     0     |
+| Granary                |    5      |     0     |
 
 ### Goods Buy/Sell Costs
 
@@ -128,6 +152,9 @@ Workshops and armoury currently use a 4x4 square footprint.
 | ----- | ---- | --- |
 | Wood  |  1   |  4  |
 | Iron  |  23  | 45  |
+| Wheat |  8   | 23  |
+| Flour |  10  | 32  |
+| Bread |  4   |  8  |
 
 ### Weapon Production and Sale
 
@@ -161,6 +188,19 @@ If a weapon needs `2` wood or `2` iron, that means two separate stockpile-to-wor
 - After crafting finishes, the worker goes `Workshop -> Armoury`, which ends the current cycle.
 - The simulator can store completed cycle counts and totals instead of saving every tiny travel event.
 
+### Bread Production
+
+- Wheat and Flour are assigned to individual Goods Yard stockpiles.
+- Wheat Farm work time is calibrated to 6950 ticks plus travel for 12 field-center/stockpile round trips. The loaded trip to stock uses `SB=1, SP=0` (16 ticks/cell); the empty return uses `SB=1, SP=1` (12 ticks/cell). The calibrated base time matches the measured three-farm reference layout at approximately 22 wheat/min.
+- A farm produces 24 wheat per cycle at fear factor 0 and 36 at fear factor -5, interpolated linearly.
+- A Wind Mill has three workers, but only one 312-tick wheat-to-flour processing operation can run at once.
+- The mill worker loop is modeled as `Flour stockpile -> Wheat stockpile -> Mill -> Flour stockpile`.
+- A Bakery cycle is `Granary -> Flour stockpile -> Bakery -> Granary` plus 1700 baking ticks.
+- One flour produces 8 bread at fear factor 0 and 12 at fear factor -5, interpolated linearly.
+- Bread throughput is the minimum of wheat supply, serialized mill capacity, and bakery capacity.
+- `Buy Wheat` can fill a farm-wheat shortage through available Wind Mills; `Buy Flour` can fill the remaining Bakery input shortage. Farm wheat is used first, then bought wheat, then bought flour.
+- Bought Wheat costs 23 gold/unit and bought Flour costs 32 gold/unit. Purchases cover Bakery demand only and are deducted from bread-economy total gold/min.
+
 ### Wall Object
 
 - `Wall` is modeled as its own object, not as a building type.
@@ -175,9 +215,8 @@ If a weapon needs `2` wood or `2` iron, that means two separate stockpile-to-wor
 
 - Unit movement speed function is:
   - `speed_cells_per_tick = 1 / (8 * (SB + 1))`
-- Workshops are the only current worker buildings.
-- Workshop slowdown base coefficient is:
-  - `SB = 2`
+- Weapon workshops and Bakery use `SB = 2` (24 ticks per cell).
+- Wheat Farm and Wind Mill use `SB = 1` (16 ticks per cell).
 
 ### Distance Objects
 

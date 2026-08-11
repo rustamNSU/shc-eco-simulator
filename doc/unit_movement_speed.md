@@ -38,7 +38,7 @@ Offsets:
 | `UNIT_QUARRY_GRUNT`        |  8 |             1 |       0 |
 | `UNIT_QUARRY_OX`           |  9 |             1 |       0 |
 | `UNIT_PITCHMAN`            | 10 |             1 |       0 |
-| `UNIT_FARMER_WHEAT`        | 11 |             1 |       0 |
+| `UNIT_FARMER_WHEAT`        | 11 |             1 |    0/1* |
 | `UNIT_FARMER_HOPS`         | 12 |             1 |       0 |
 | `UNIT_FARMER_APPLE`        | 13 |             1 |       0 |
 | `UNIT_FARMER_CATTLE`       | 14 |             1 |       0 |
@@ -69,6 +69,7 @@ Offsets:
 | `UNIT_BEDOUIN_HEAVY_CAMEL` | 83 |             1 |       2 |
 
 Note:
+- `UNIT_FARMER_WHEAT` uses `SpeedUp=0` while carrying wheat to stock and `SpeedUp=1` while returning empty-handed.
 - `UNIT_MACEMAN` uses `SB=1`, `SpeedUp=1` in normal gameplay.
 - In map editor it can appear as `SpeedUp=0` (known bug/inconsistency).
 

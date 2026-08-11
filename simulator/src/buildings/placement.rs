@@ -20,6 +20,12 @@ impl BuildingPlacement {
             .map(move |(dx, dy)| (self.x + dx, self.y + dy))
     }
 
+    pub fn blocking_cells(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.footprint
+            .blocking_offsets()
+            .map(move |(dx, dy)| (self.x + dx, self.y + dy))
+    }
+
     pub fn width(&self) -> usize {
         self.footprint.width()
     }

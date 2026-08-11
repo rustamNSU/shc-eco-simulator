@@ -1,7 +1,10 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StockpileResource {
     Wood,
     Iron,
+    Wheat,
+    Flour,
 }
 
 impl StockpileResource {
@@ -9,6 +12,8 @@ impl StockpileResource {
         match self {
             Self::Wood => "Wood",
             Self::Iron => "Iron",
+            Self::Wheat => "Wheat",
+            Self::Flour => "Flour",
         }
     }
 
@@ -16,6 +21,8 @@ impl StockpileResource {
         match self {
             Self::Wood => "W",
             Self::Iron => "I",
+            Self::Wheat => "Wh",
+            Self::Flour => "Fl",
         }
     }
 }

@@ -325,7 +325,7 @@ export component MainWindow inherits Window {
     preferred-height: 940px;
     min-width: 1068px;
     min-height: 820px;
-    title: "SHC Eco Simulator - Map Editor";
+    title: "SHC Eco Simulator - " + root.current-project-name;
 
     in property <int> map-size: 100;
     in-out property <float> zoom: 1.0;
@@ -354,12 +354,17 @@ export component MainWindow inherits Window {
     in-out property <int> fear-factor: 0;
     in-out property <bool> buy-wood: true;
     in-out property <bool> buy-iron: true;
+    in-out property <bool> buy-wheat: false;
+    in-out property <bool> buy-flour: false;
     in property <string> eco-setup-cost: "Eco setup cost: 0 gold";
     in property <string> workshop-count-summary: "";
+    in property <string> bread-count-summary: "";
     in property <string> armoury-summary: "Armoury production\nNo armoury placed";
     in-out property <string> fletchers-weapon: "bow";
     in-out property <string> poleturners-weapon: "spear";
     in-out property <string> blacksmiths-weapon: "sword";
+    in property <string> current-project-name: "Untitled";
+    in property <string> recent-project-name: "";
 
     callback place-at(float, float);
     callback hover-at(float, float);
@@ -375,11 +380,17 @@ export component MainWindow inherits Window {
     callback set-fear-factor(float);
     callback set-buy-wood(bool);
     callback set-buy-iron(bool);
+    callback set-buy-wheat(bool);
+    callback set-buy-flour(bool);
     callback run-simulation();
     callback set-simulation-tooltips-enabled(bool);
     callback toggle-fletchers-weapon();
     callback toggle-poleturners-weapon();
     callback toggle-blacksmiths-weapon();
+    callback open-project();
+    callback open-recent-project();
+    callback save-project();
+    callback save-project-as();
 
     private property <length> cell-px: 10px * root.zoom;
     private property <length> map-px: root.map-size * root.cell-px;
@@ -412,6 +423,14 @@ export component MainWindow inherits Window {
                 root.redo();
                 return accept;
             }
+            if event.modifiers.control && (event.text == "s" || event.text == "S") {
+                root.save-project();
+                return accept;
+            }
+            if event.modifiers.control && (event.text == "o" || event.text == "O") {
+                root.open-project();
+                return accept;
+            }
             return reject;
         }
         assets-panel := Rectangle {
@@ -433,7 +452,7 @@ export component MainWindow inherits Window {
                 border-color: #d9d9d9;
                 border-radius: 6px;
                 background: #fafafa;
-                min-height: 324px;
+                min-height: 480px;
 
                 VerticalBox {
                     padding: 8px;
@@ -490,6 +509,28 @@ export component MainWindow inherits Window {
                         selected-id: root.selected-building;
                         map-color: #aaaab2;
                         icon: @image-url("../assets/iron.png");
+                        use-icon: true;
+                        show-color-mark: false;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    ToolButton {
+                        title: "Wheat Stock";
+                        tool-id: "set_wheat_stock";
+                        selected-id: root.selected-building;
+                        map-color: #d4b849;
+                        icon: @image-url("../assets/goods/wheat.png");
+                        use-icon: true;
+                        show-color-mark: false;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    ToolButton {
+                        title: "Flour Stock";
+                        tool-id: "set_flour_stock";
+                        selected-id: root.selected-building;
+                        map-color: #e8e0c4;
+                        icon: @image-url("../assets/goods/flour.png");
                         use-icon: true;
                         show-color-mark: false;
                         selected(id) => { root.select-building(id); }
@@ -565,6 +606,42 @@ export component MainWindow inherits Window {
                         selected(id) => { root.select-building(id); }
                     }
 
+                    BuildingButton {
+                        title: "Wheat Farm";
+                        building-id: "wheat_farm";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/ST30_Wheatfarm.png");
+                        map-color: #c2ae4c;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Wind Mill";
+                        building-id: "windmill";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/ST34_Mill.png");
+                        map-color: #a49b8a;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Bakery";
+                        building-id: "bakery";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/ST17_Bakers_Workshop.png");
+                        map-color: #be7742;
+                        selected(id) => { root.select-building(id); }
+                    }
+
+                    BuildingButton {
+                        title: "Granary";
+                        building-id: "granary";
+                        selected-id: root.selected-building;
+                        icon: @image-url("../assets/ST19_Granary.png");
+                        map-color: #895c3a;
+                        selected(id) => { root.select-building(id); }
+                    }
+
                     ToolButton {
                         title: "Wall";
                         tool-id: "wall";
@@ -591,6 +668,31 @@ export component MainWindow inherits Window {
         VerticalBox {
             padding: 10px;
             spacing: 8px;
+
+            HorizontalBox {
+                spacing: 8px;
+
+                Button {
+                    text: "Open";
+                    clicked => { root.open-project(); }
+                }
+
+                Button {
+                    enabled: root.recent-project-name != "";
+                    text: root.recent-project-name == "" ? "Recent" : "Recent: " + root.recent-project-name;
+                    clicked => { root.open-recent-project(); }
+                }
+
+                Button {
+                    text: "Save (Ctrl+S)";
+                    clicked => { root.save-project(); }
+                }
+
+                Button {
+                    text: "Save As";
+                    clicked => { root.save-project-as(); }
+                }
+            }
 
             HorizontalBox {
                 spacing: 8px;
@@ -1033,6 +1135,20 @@ export component MainWindow inherits Window {
                             checked: root.buy-iron;
                             changed(value) => { root.set-buy-iron(value); }
                         }
+
+                        BuyResourceToggle {
+                            title: "Buy Wheat";
+                            icon: @image-url("../assets/goods/wheat.png");
+                            checked: root.buy-wheat;
+                            changed(value) => { root.set-buy-wheat(value); }
+                        }
+
+                        BuyResourceToggle {
+                            title: "Buy Flour";
+                            icon: @image-url("../assets/goods/flour.png");
+                            checked: root.buy-flour;
+                            changed(value) => { root.set-buy-flour(value); }
+                        }
                     }
 
                     Rectangle {
@@ -1068,15 +1184,30 @@ export component MainWindow inherits Window {
                             border-radius: 6px;
                             background: #fbfcfe;
 
-                            Text {
-                                x: 10px;
-                                y: 8px;
-                                width: parent.width - 20px;
-                                height: parent.height - 16px;
-                                text: root.workshop-count-summary;
-                                color: #374151;
-                                font-size: 12px;
-                                wrap: word-wrap;
+                            HorizontalBox {
+                                padding: 10px;
+                                spacing: 10px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: root.workshop-count-summary;
+                                    color: #374151;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+
+                                Rectangle {
+                                    width: 1px;
+                                    background: #d3d9e2;
+                                }
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: root.bread-count-summary;
+                                    color: #374151;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
                             }
                         }
 

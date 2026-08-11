@@ -6,6 +6,7 @@ use super::MapError;
 pub struct CellMap {
     size: usize,
     cells: Vec<Option<u32>>,
+    blocked: Vec<bool>,
 }
 
 impl CellMap {
@@ -13,6 +14,7 @@ impl CellMap {
         Self {
             size,
             cells: vec![None; size * size],
+            blocked: vec![false; size * size],
         }
     }
 
@@ -28,6 +30,10 @@ impl CellMap {
         x < self.size && y < self.size
     }
 
+    pub fn is_blocked(&self, x: usize, y: usize) -> bool {
+        self.is_in_bounds(x, y) && self.blocked[self.index(x, y)]
+    }
+
     pub fn can_place(&self, placement: &BuildingPlacement) -> Result<(), MapError> {
         self.can_place_cells(placement.occupied_cells())
     }
@@ -35,7 +41,14 @@ impl CellMap {
     pub fn place(&mut self, placement: &BuildingPlacement) -> Result<(), MapError> {
         self.can_place(placement)?;
 
-        self.place_cells(placement.id, placement.occupied_cells())?;
+        for (x, y) in placement.occupied_cells() {
+            let idx = self.index(x, y);
+            self.cells[idx] = Some(placement.id);
+        }
+        for (x, y) in placement.blocking_cells() {
+            let idx = self.index(x, y);
+            self.blocked[idx] = true;
+        }
 
         Ok(())
     }
@@ -66,6 +79,7 @@ impl CellMap {
         for (x, y) in cells {
             let idx = self.index(x, y);
             self.cells[idx] = Some(occupant_id);
+            self.blocked[idx] = true;
         }
 
         Ok(())
@@ -78,6 +92,7 @@ impl CellMap {
             }
             let idx = self.index(x, y);
             self.cells[idx] = None;
+            self.blocked[idx] = false;
         }
     }
 

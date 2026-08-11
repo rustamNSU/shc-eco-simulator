@@ -8,6 +8,7 @@ slint::include_modules!();
 mod app;
 mod backend;
 mod editor_state;
+mod project_files;
 mod visuals;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

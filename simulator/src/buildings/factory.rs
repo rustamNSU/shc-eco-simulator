@@ -14,6 +14,13 @@ impl BuildingFactory {
         }
     }
 
+    pub(crate) fn with_next_ids(next_id: u32, next_goods_yard_group_id: u32) -> Self {
+        Self {
+            next_id,
+            next_goods_yard_group_id,
+        }
+    }
+
     pub fn create(&mut self, building_type: BuildingType, x: usize, y: usize) -> BuildingPlacement {
         let placement = BuildingPlacement {
             id: self.next_id,

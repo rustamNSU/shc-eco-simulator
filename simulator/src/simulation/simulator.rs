@@ -1,13 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    SavedBuilding,
     buildings::{BuildingFactory, BuildingPlacement, BuildingType, StockpileResource},
     map::{CellMap, MapError},
+    project::validate_unique_ids,
     walls::{WallSegment, line_cells},
 };
 
 use super::{
-    BuildingDistance, DistanceKey, GameTime,
+    BreadEconomyReport, BuildingDistance, DistanceKey, GameTime,
+    bread::calculate_bread_economy,
     entry_logic::{calculate_building_entry, resolve_entry_point_for_square, wall_contains_cell},
     pathfinding::recompute_building_distances,
     production_cycle::{
@@ -36,6 +39,8 @@ pub enum SimulatorError {
     InvalidMapSize,
     InvalidWallDirection,
     StockpileDesignationRequiresStockpile,
+    InvalidProject(&'static str),
+    UnsupportedProjectVersion { version: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +67,10 @@ impl core::fmt::Display for SimulatorError {
                     "stockpile designation can only be applied to a stockpile"
                 )
             }
+            Self::InvalidProject(message) => write!(f, "invalid project: {message}"),
+            Self::UnsupportedProjectVersion { version } => {
+                write!(f, "project format version {version} is not supported")
+            }
         }
     }
 }
@@ -82,7 +91,7 @@ fn is_entry_point_available(
         return false;
     };
 
-    map.is_in_bounds(entry_point.x, entry_point.y) && !map.is_occupied(entry_point.x, entry_point.y)
+    map.is_in_bounds(entry_point.x, entry_point.y) && !map.is_blocked(entry_point.x, entry_point.y)
 }
 
 impl Simulator {
@@ -101,6 +110,76 @@ impl Simulator {
             distances: HashMap::new(),
             worker_distances: HashMap::new(),
         })
+    }
+
+    pub fn from_saved_layout(
+        map_size: usize,
+        saved_buildings: Vec<SavedBuilding>,
+        walls: Vec<WallSegment>,
+    ) -> Result<Self, SimulatorError> {
+        if map_size == 0 {
+            return Err(SimulatorError::InvalidMapSize);
+        }
+        validate_unique_ids(&saved_buildings, &walls)?;
+
+        let next_building_id = saved_buildings
+            .iter()
+            .map(|building| building.id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(SimulatorError::InvalidProject("building ID is too large"))?;
+        let next_group_id = saved_buildings
+            .iter()
+            .filter_map(|building| building.goods_yard_group_id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(SimulatorError::InvalidProject(
+                "goods yard group ID is too large",
+            ))?;
+        let next_wall_id = walls
+            .iter()
+            .map(|wall| wall.id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(SimulatorError::InvalidProject("wall ID is too large"))?;
+
+        let mut map = CellMap::new(map_size);
+        let buildings = saved_buildings
+            .into_iter()
+            .map(SavedBuilding::into_placement)
+            .collect::<Vec<_>>();
+        for building in &buildings {
+            if let Some(entry) = building.entry_point
+                && !map.is_in_bounds(entry.x, entry.y)
+            {
+                return Err(SimulatorError::InvalidProject(
+                    "building entry point is outside the map",
+                ));
+            }
+            map.place(building)?;
+        }
+        for wall in &walls {
+            if !wall.is_axis_aligned() {
+                return Err(SimulatorError::InvalidWallDirection);
+            }
+            map.place_cells(wall.id, wall.cells())?;
+        }
+
+        let mut simulator = Self {
+            map,
+            factory: BuildingFactory::with_next_ids(next_building_id, next_group_id),
+            time: GameTime::new(),
+            buildings,
+            walls,
+            next_wall_id,
+            distances: HashMap::new(),
+            worker_distances: HashMap::new(),
+        };
+        simulator.recompute_distances();
+        Ok(simulator)
     }
 
     pub fn map_size(&self) -> usize {
@@ -294,6 +373,10 @@ impl Simulator {
     pub fn calculate_worker_distances(&mut self) -> usize {
         self.worker_distances = build_worker_distances(&self.buildings, &self.distances);
         self.worker_distances.len()
+    }
+
+    pub fn calculate_bread_economy(&self, settings: SimulationSettings) -> BreadEconomyReport {
+        calculate_bread_economy(&self.buildings, &self.distances, settings)
     }
 
     pub fn calculate_production_cycle(
@@ -635,6 +718,149 @@ mod tests {
         assert_eq!(
             simulator.buildings()[0].entry_point,
             Some(EntryPoint { x: 4, y: 2 })
+        );
+    }
+
+    #[test]
+    fn calculates_complete_bread_economy_with_traversable_wheat_field() {
+        let mut simulator = Simulator::new(60).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::WheatFarm, 2, 2)
+            .expect("wheat farm should be placed");
+        simulator
+            .place_building(BuildingType::Windmill, 14, 3)
+            .expect("wind mill should be placed");
+        simulator
+            .place_building(BuildingType::GoodsYard, 20, 20)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(20, 20, StockpileResource::Wheat)
+            .expect("wheat stockpile should be assigned");
+        simulator
+            .set_stockpile_resource_at(23, 20, StockpileResource::Flour)
+            .expect("flour stockpile should be assigned");
+        simulator
+            .place_building(BuildingType::Bakery, 30, 10)
+            .expect("bakery should be placed");
+        simulator
+            .place_building(BuildingType::Granary, 40, 10)
+            .expect("granary should be placed");
+
+        let farm = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.building_type == BuildingType::WheatFarm)
+            .expect("wheat farm should exist");
+        assert_eq!(farm.entry_point, Some(EntryPoint { x: 6, y: 5 }));
+
+        let report = simulator.calculate_bread_economy(SimulationSettings::default());
+        assert!(report.issues.is_empty(), "{:?}", report.issues);
+        assert_eq!(report.wheat_per_farm_cycle, 24.0);
+        assert_eq!(report.bread_per_flour, 8.0);
+        assert!(report.wheat_per_minute > 0.0);
+        assert!(report.flour_per_minute > 0.0);
+        assert!(report.bread_per_minute > 0.0);
+        assert_eq!(report.farm_rates.len(), 1);
+        assert_eq!(report.mill_rates.len(), 1);
+        assert_eq!(report.bakery_rates.len(), 1);
+        assert_eq!(
+            report.farm_rates[0].actual_per_minute,
+            report.wheat_per_minute
+        );
+        assert_eq!(
+            report.mill_rates[0].actual_per_minute,
+            report.flour_per_minute
+        );
+        assert_eq!(
+            report.bakery_rates[0].actual_per_minute,
+            report.bread_batches_per_minute
+        );
+        assert!(
+            (report.surplus_wheat_per_minute - (report.wheat_per_minute - report.flour_per_minute))
+                .abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (report.surplus_flour_per_minute
+                - (report.flour_per_minute - report.bread_batches_per_minute))
+                .abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn mill_entry_can_use_a_traversable_wheat_field_cell() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::WheatFarm, 5, 5)
+            .expect("wheat farm should be placed");
+        simulator
+            .place_building(BuildingType::Windmill, 9, 14)
+            .expect("wind mill should be placed");
+
+        let mill = simulator
+            .buildings()
+            .iter()
+            .find(|building| building.building_type == BuildingType::Windmill)
+            .expect("wind mill should exist");
+        assert_eq!(mill.entry_point, Some(EntryPoint { x: 10, y: 13 }));
+    }
+
+    #[test]
+    fn bought_wheat_or_flour_can_supply_bakeries_without_farms() {
+        let mut simulator = Simulator::new(60).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Windmill, 14, 3)
+            .expect("wind mill should be placed");
+        simulator
+            .place_building(BuildingType::GoodsYard, 20, 20)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(20, 20, StockpileResource::Wheat)
+            .expect("wheat stockpile should be assigned");
+        simulator
+            .set_stockpile_resource_at(23, 20, StockpileResource::Flour)
+            .expect("flour stockpile should be assigned");
+        simulator
+            .place_building(BuildingType::Bakery, 30, 10)
+            .expect("bakery should be placed");
+        simulator
+            .place_building(BuildingType::Granary, 40, 10)
+            .expect("granary should be placed");
+
+        let without_buying = simulator.calculate_bread_economy(SimulationSettings::default());
+        assert_eq!(without_buying.bread_per_minute, 0.0);
+
+        let bought_wheat = simulator.calculate_bread_economy(SimulationSettings {
+            buy_wheat: true,
+            ..SimulationSettings::default()
+        });
+        assert!(bought_wheat.purchased_wheat_per_minute > 0.0);
+        assert_eq!(bought_wheat.purchased_flour_per_minute, 0.0);
+        assert!(bought_wheat.bread_per_minute > 0.0);
+
+        let bought_flour = simulator.calculate_bread_economy(SimulationSettings {
+            buy_flour: true,
+            ..SimulationSettings::default()
+        });
+        assert_eq!(bought_flour.purchased_wheat_per_minute, 0.0);
+        assert!(bought_flour.purchased_flour_per_minute > 0.0);
+        assert!(bought_flour.bread_per_minute > 0.0);
+    }
+
+    #[test]
+    fn bakery_uses_workshop_wall_orientation_rules() {
+        let mut simulator = Simulator::new(30).expect("simulator should be created");
+        simulator
+            .place_wall(14, 10, 14, 13)
+            .expect("wall should be placed");
+        simulator
+            .place_building(BuildingType::Bakery, 10, 10)
+            .expect("bakery should be placed");
+
+        assert_eq!(
+            simulator.buildings()[0].entry_point,
+            Some(EntryPoint { x: 9, y: 11 })
         );
     }
 

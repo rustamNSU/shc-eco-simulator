@@ -5,6 +5,7 @@ pub struct Footprint {
     width: usize,
     height: usize,
     occupied: Vec<bool>,
+    blocking: Vec<bool>,
 }
 
 impl Footprint {
@@ -13,6 +14,7 @@ impl Footprint {
             width: size,
             height: size,
             occupied: vec![true; size * size],
+            blocking: vec![true; size * size],
         }
     }
 
@@ -33,7 +35,24 @@ impl Footprint {
         Self {
             width: 5,
             height: 5,
+            blocking: occupied.clone(),
             occupied,
+        }
+    }
+
+    pub fn wheat_farm() -> Self {
+        let mut blocking = vec![false; 9 * 9];
+        for y in 6..9 {
+            for x in 0..3 {
+                blocking[(y * 9) + x] = true;
+            }
+        }
+
+        Self {
+            width: 9,
+            height: 9,
+            occupied: vec![true; 9 * 9],
+            blocking,
         }
     }
 
@@ -41,7 +60,11 @@ impl Footprint {
         match building_type {
             BuildingType::GoodsYard => Self::goods_yard(),
             BuildingType::Stockpile => Self::square(2),
+            BuildingType::Windmill => Self::square(3),
+            BuildingType::WheatFarm => Self::wheat_farm(),
             BuildingType::Armoury
+            | BuildingType::Bakery
+            | BuildingType::Granary
             | BuildingType::FletchersWorkshop
             | BuildingType::BlacksmithsWorkshop
             | BuildingType::PoleturnersWorkshop
@@ -69,5 +92,31 @@ impl Footprint {
                 let y = index / self.width;
                 Some((x, y))
             })
+    }
+
+    pub fn blocking_offsets(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.blocking
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, is_blocking)| {
+                is_blocking.then_some((index % self.width, index / self.width))
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Footprint;
+
+    #[test]
+    fn wheat_farm_reserves_full_area_but_only_cabin_blocks_paths() {
+        let footprint = Footprint::wheat_farm();
+        let occupied = footprint.occupied_offsets().collect::<Vec<_>>();
+        let blocking = footprint.blocking_offsets().collect::<Vec<_>>();
+
+        assert_eq!(occupied.len(), 81);
+        assert_eq!(blocking.len(), 9);
+        assert!(blocking.contains(&(0, 8)));
+        assert!(!blocking.contains(&(4, 3)));
     }
 }

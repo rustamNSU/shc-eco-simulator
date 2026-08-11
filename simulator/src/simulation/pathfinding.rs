@@ -52,7 +52,7 @@ pub(crate) fn shortest_path_len(
         return Some(0);
     }
 
-    if map.is_occupied(start.x, start.y) || map.is_occupied(finish.x, finish.y) {
+    if map.is_blocked(start.x, start.y) || map.is_blocked(finish.x, finish.y) {
         return None;
     }
 
@@ -81,7 +81,7 @@ pub(crate) fn shortest_path_len(
 
                 let ux = nx as usize;
                 let uy = ny as usize;
-                if !map.is_in_bounds(ux, uy) || map.is_occupied(ux, uy) {
+                if !map.is_in_bounds(ux, uy) || map.is_blocked(ux, uy) {
                     continue;
                 }
 
