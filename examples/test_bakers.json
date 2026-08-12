@@ -1,0 +1,354 @@
+{
+  "version": 1,
+  "map_size": 100,
+  "buildings": [
+    {
+      "id": 110,
+      "building_type": "stockpile",
+      "x": 53,
+      "y": 42,
+      "goods_yard_group_id": 3,
+      "stockpile_resource": "flour",
+      "entry_point": {
+        "x": 53,
+        "y": 41
+      }
+    },
+    {
+      "id": 111,
+      "building_type": "stockpile",
+      "x": 56,
+      "y": 42,
+      "goods_yard_group_id": 3,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 56,
+        "y": 41
+      }
+    },
+    {
+      "id": 112,
+      "building_type": "stockpile",
+      "x": 53,
+      "y": 45,
+      "goods_yard_group_id": 3,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 53,
+        "y": 44
+      }
+    },
+    {
+      "id": 113,
+      "building_type": "stockpile",
+      "x": 56,
+      "y": 45,
+      "goods_yard_group_id": 3,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 56,
+        "y": 44
+      }
+    },
+    {
+      "id": 114,
+      "building_type": "granary",
+      "x": 54,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 54,
+        "y": 41
+      }
+    },
+    {
+      "id": 115,
+      "building_type": "bakery",
+      "x": 50,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 49,
+        "y": 37
+      }
+    },
+    {
+      "id": 116,
+      "building_type": "bakery",
+      "x": 50,
+      "y": 33,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 52,
+        "y": 32
+      }
+    },
+    {
+      "id": 117,
+      "building_type": "bakery",
+      "x": 54,
+      "y": 33,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 56,
+        "y": 32
+      }
+    },
+    {
+      "id": 118,
+      "building_type": "bakery",
+      "x": 50,
+      "y": 28,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 52,
+        "y": 27
+      }
+    },
+    {
+      "id": 119,
+      "building_type": "bakery",
+      "x": 54,
+      "y": 28,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 56,
+        "y": 27
+      }
+    },
+    {
+      "id": 120,
+      "building_type": "bakery",
+      "x": 45,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 47,
+        "y": 36
+      }
+    },
+    {
+      "id": 121,
+      "building_type": "bakery",
+      "x": 41,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 43,
+        "y": 36
+      }
+    },
+    {
+      "id": 122,
+      "building_type": "bakery",
+      "x": 37,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 39,
+        "y": 36
+      }
+    },
+    {
+      "id": 123,
+      "building_type": "bakery",
+      "x": 45,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 47,
+        "y": 31
+      }
+    },
+    {
+      "id": 124,
+      "building_type": "bakery",
+      "x": 41,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 43,
+        "y": 31
+      }
+    },
+    {
+      "id": 125,
+      "building_type": "bakery",
+      "x": 37,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 39,
+        "y": 31
+      }
+    },
+    {
+      "id": 126,
+      "building_type": "bakery",
+      "x": 45,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 47,
+        "y": 26
+      }
+    },
+    {
+      "id": 127,
+      "building_type": "bakery",
+      "x": 41,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 43,
+        "y": 26
+      }
+    },
+    {
+      "id": 128,
+      "building_type": "bakery",
+      "x": 37,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 39,
+        "y": 26
+      }
+    },
+    {
+      "id": 129,
+      "building_type": "bakery",
+      "x": 59,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 61,
+        "y": 36
+      }
+    },
+    {
+      "id": 130,
+      "building_type": "bakery",
+      "x": 63,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 65,
+        "y": 36
+      }
+    },
+    {
+      "id": 131,
+      "building_type": "bakery",
+      "x": 67,
+      "y": 37,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 69,
+        "y": 36
+      }
+    },
+    {
+      "id": 132,
+      "building_type": "bakery",
+      "x": 59,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 61,
+        "y": 31
+      }
+    },
+    {
+      "id": 133,
+      "building_type": "bakery",
+      "x": 63,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 65,
+        "y": 31
+      }
+    },
+    {
+      "id": 134,
+      "building_type": "bakery",
+      "x": 67,
+      "y": 32,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 69,
+        "y": 31
+      }
+    },
+    {
+      "id": 135,
+      "building_type": "bakery",
+      "x": 59,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 61,
+        "y": 26
+      }
+    },
+    {
+      "id": 136,
+      "building_type": "bakery",
+      "x": 63,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 65,
+        "y": 26
+      }
+    },
+    {
+      "id": 137,
+      "building_type": "bakery",
+      "x": 67,
+      "y": 27,
+      "goods_yard_group_id": null,
+      "stockpile_resource": null,
+      "entry_point": {
+        "x": 69,
+        "y": 26
+      }
+    }
+  ],
+  "walls": [],
+  "simulation": {
+    "game_speed_ticks_per_second": 50,
+    "fear_factor": 0,
+    "buy_wood": true,
+    "buy_iron": true,
+    "optimized_fletcher_routing": false,
+    "fletchers_weapon": "bow",
+    "poleturners_weapon": "spear",
+    "blacksmiths_weapon": "sword"
+  }
+}
+
