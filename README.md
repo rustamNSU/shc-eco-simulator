@@ -15,6 +15,7 @@ This repository has two crates:
 - [Product Vision](#product-vision)
 - [Documentation](#documentation)
 - [Project Files](#project-files)
+- [Population & Economy Calculator](#population--economy-calculator)
 - [Domain Baseline](#domain-baseline)
   - [Map](#map)
   - [Building Placement](#building-placement)
@@ -74,9 +75,23 @@ Additional domain notes live in `doc/`.
 
 - `Open`, `Open Recent`, `Save`, and `Save As` are available above the map. Keyboard shortcuts are `Ctrl+O` and `Ctrl+S`.
 - New saves default to `%LOCALAPPDATA%\SHCEcoSimulator\Projects` on Windows, but the standard file dialog can save or open a shared `.json` file anywhere.
-- A project stores map geometry, building IDs and positions, goods-yard groups, stockpile resources, entry points, walls, and simulation settings such as selected weapons and resource-buy options.
+- A project stores map geometry, building IDs and positions, goods-yard groups, stockpile resources, entry points, walls, simulation settings, and Population & Economy calculator inputs.
 - Calculated paths, worker distances, production results, and tooltip statistics are not stored; they are regenerated after opening.
 - The recent-file list is stored in `%LOCALAPPDATA%\SHCEcoSimulator\recent.json`.
+
+## Population & Economy Calculator
+
+The `Population & Economy` workspace is a separate full-size calculator tab linked to the current layout.
+
+- Population is adjustable from 0 to a configurable maximum (default 500). A red marker shows workers required by placed farms, mills, bakeries, weapon workshops, inns, stone quarries/oxen, and iron mines.
+- Tax levels use the supplied popularity/coefficient table. Tax gold/min is `population × coefficient × (game-speed × 60 / 800)`.
+- Food settings are No Food (`-8`, `0x`), Half (`-4`, `0.5x`), Normal (`0`, `1x`), Extra (`+4`, `1.5x`), and Double (`+8`, `2x`). Normal consumption is `0.6 food/person/min`; current bread output is used as available food.
+- Each Inn costs 20 wood + 100 gold, needs 1 worker, costs 11.2 gold/min to operate, and covers 30 population. Inn popularity is `+8` at full coverage, then `+6/+4/+2/0` at the supplied thresholds.
+- Stone quarry + ox costs 25 wood, needs 4 workers, and produces 18.6 stone/min at fear factor 0. An Iron Mine costs 20 wood, needs 2 workers, and produces 2.63 iron/min.
+- Mine output increases linearly to `1.33x` at fear factor `-5`. Fear factor itself contributes its signed `0…-5` value to total popularity.
+- Total popularity combines tax, food, inns, and fear factor and is green when non-negative or red when negative.
+- In this workspace, population food consumption is deducted before bread-sale income is counted: only bread remaining after the selected ration can be sold. The Layout Simulator remains unchanged and continues to report raw production/sell potential.
+- Total gold/min combines the food-adjusted layout economy, tax, iron mine benefit, and Inn beer expense. Stone is reported as output only because no stone sell price has been supplied.
 
 ## Domain Baseline
 

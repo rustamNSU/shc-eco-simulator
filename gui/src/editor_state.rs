@@ -1,7 +1,7 @@
 use crate::backend::{BackendCommand, CycleSimulationRow};
 use simulator::{
-    BuildingType, DEFAULT_MAP_SIZE, Footprint, SimulationSettings, Simulator, StockpileResource,
-    WeaponType, clamped_fear_factor, walls::line_cells,
+    BuildingType, DEFAULT_MAP_SIZE, Footprint, PopulationEconomySettings, SimulationSettings,
+    Simulator, StockpileResource, WeaponType, clamped_fear_factor, walls::line_cells,
 };
 
 enum SelectedTool {
@@ -26,6 +26,7 @@ pub struct EditorState {
     wall_start: Option<(i32, i32)>,
     simulation_tooltips_enabled: bool,
     simulation_settings: SimulationSettings,
+    population_economy_settings: PopulationEconomySettings,
     cycle_rows: Vec<CycleSimulationRow>,
 }
 
@@ -38,6 +39,7 @@ impl EditorState {
             wall_start: None,
             simulation_tooltips_enabled: false,
             simulation_settings: SimulationSettings::default(),
+            population_economy_settings: PopulationEconomySettings::default(),
             cycle_rows: Vec::new(),
         })
     }
@@ -225,6 +227,49 @@ impl EditorState {
         self.simulation_settings = settings;
         self.cycle_rows.clear();
         self.wall_start = None;
+    }
+
+    pub fn population_economy_settings(&self) -> PopulationEconomySettings {
+        self.population_economy_settings
+    }
+
+    pub fn set_population_economy_settings(&mut self, settings: PopulationEconomySettings) {
+        self.population_economy_settings = settings.normalized();
+    }
+
+    pub fn set_max_population(&mut self, value: u32) {
+        self.population_economy_settings.max_population = value;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_population(&mut self, value: f32) {
+        self.population_economy_settings.population = value.round().max(0.0) as u32;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_inn_count(&mut self, value: u32) {
+        self.population_economy_settings.inn_count = value;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_stone_quarry_count(&mut self, value: u32) {
+        self.population_economy_settings.stone_quarry_count = value;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_iron_mine_count(&mut self, value: u32) {
+        self.population_economy_settings.iron_mine_count = value;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_tax_index(&mut self, value: f32) {
+        self.population_economy_settings.tax_index = value.round().max(0.0) as u8;
+        self.population_economy_settings = self.population_economy_settings.normalized();
+    }
+
+    pub fn set_food_ratio_index(&mut self, value: f32) {
+        self.population_economy_settings.food_ratio_index = value.round().max(0.0) as u8;
+        self.population_economy_settings = self.population_economy_settings.normalized();
     }
 
     pub fn game_speed(&self) -> u32 {

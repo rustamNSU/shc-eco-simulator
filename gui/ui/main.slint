@@ -1,4 +1,4 @@
-import { Button, CheckBox, HorizontalBox, ScrollView, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, CheckBox, HorizontalBox, LineEdit, ScrollView, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
 
 export struct OccupiedCellVisual {
     x: int,
@@ -248,6 +248,152 @@ component BuyResourceToggle inherits Rectangle {
     }
 }
 
+component SteppedPopularitySlider inherits Rectangle {
+    in property <[string]> stop-labels;
+    in property <float> selected-index;
+    callback selected(float);
+
+    min-height: 52px;
+    max-height: 52px;
+    background: transparent;
+
+    private property <length> rail-padding: 10px;
+    private property <length> rail-width: max(1px, root.width - root.rail-padding * 2);
+    private property <float> maximum-index: max(1, root.stop-labels.length - 1);
+    private property <float> live-index: root.selected-index;
+    private property <bool> dragging: false;
+
+    changed selected-index => {
+        if (!root.dragging) {
+            root.live-index = root.selected-index;
+        }
+    }
+
+    function update-live-index(mouse-x: length) {
+        root.live-index = min(
+            root.maximum-index,
+            max(0, (mouse-x - root.rail-padding) / root.rail-width * root.maximum-index),
+        );
+    }
+
+    function commit-nearest-stop() {
+        root.live-index = round(root.live-index);
+        root.dragging = false;
+        root.selected(root.live-index);
+    }
+
+    Rectangle {
+        x: root.rail-padding;
+        y: 11px;
+        width: root.rail-width;
+        height: 4px;
+        border-radius: 2px;
+        background: #9ca3af;
+    }
+
+    Rectangle {
+        x: root.rail-padding;
+        y: 11px;
+        width: root.rail-width * root.live-index / root.maximum-index;
+        height: 4px;
+        border-radius: 2px;
+        background: #1473c9;
+    }
+
+    for label[index] in root.stop-labels: Rectangle {
+        x: root.rail-padding + root.rail-width * index / root.maximum-index - 2px;
+        y: 7px;
+        width: 4px;
+        height: 12px;
+        border-radius: 2px;
+        background: index <= round(root.live-index) ? #1473c9 : #6b7280;
+
+        Text {
+            x: index == 0 ? -3px : (index == root.stop-labels.length - 1 ? 7px - self.width : 2px - self.width / 2);
+            y: 18px;
+            width: max(28px, root.rail-width / root.stop-labels.length);
+            height: 18px;
+            text: label;
+            color: index == round(root.live-index) ? #0f5fa8 : #64748b;
+            font-size: root.stop-labels.length > 8 ? 9px : 10px;
+            font-weight: index == round(root.live-index) ? 700 : 400;
+            horizontal-alignment: index == 0 ? left : (index == root.stop-labels.length - 1 ? right : center);
+            vertical-alignment: center;
+        }
+    }
+
+    Rectangle {
+        x: root.rail-padding + root.rail-width * root.live-index / root.maximum-index - 8px;
+        y: 5px;
+        width: 16px;
+        height: 16px;
+        border-width: 2px;
+        border-color: #ffffff;
+        border-radius: 8px;
+        background: #1473c9;
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #66000000;
+        drop-shadow-offset-y: 1px;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 34px;
+
+        pointer-event(event) => {
+            if event.button != PointerEventButton.left {
+                return;
+            }
+
+            if event.kind == PointerEventKind.down {
+                root.dragging = true;
+                root.update-live-index(self.mouse-x);
+            } else if event.kind == PointerEventKind.up && root.dragging {
+                root.update-live-index(self.mouse-x);
+                root.commit-nearest-stop();
+            }
+        }
+
+        moved => {
+            if root.dragging {
+                root.update-live-index(self.mouse-x);
+            }
+        }
+    }
+}
+
+component NumberSetting inherits Rectangle {
+    in property <string> title;
+    in property <int> value;
+    callback submitted(string);
+
+    min-height: 58px;
+    max-height: 58px;
+    border-width: 1px;
+    border-color: #d3d9e2;
+    border-radius: 6px;
+    background: #fbfcfe;
+
+    Text {
+        x: 10px;
+        y: 5px;
+        width: parent.width - 20px;
+        height: 18px;
+        text: root.title;
+        color: #374151;
+        font-size: 12px;
+    }
+
+    LineEdit {
+        x: 10px;
+        y: 26px;
+        width: parent.width - 20px;
+        height: 26px;
+        text: "" + root.value;
+        accepted => { root.submitted(self.text); }
+    }
+}
+
 component ToolButton inherits Rectangle {
     in property <string> title;
     in property <string> tool-id;
@@ -365,6 +511,21 @@ export component MainWindow inherits Window {
     in-out property <string> blacksmiths-weapon: "sword";
     in property <string> current-project-name: "Untitled";
     in property <string> recent-project-name: "";
+    in-out property <int> active-workspace: 0;
+    in property <int> population-max: 500;
+    in property <int> population-current: 0;
+    in property <int> population-workers: 0;
+    in property <int> inn-count: 0;
+    in property <int> stone-quarry-count: 0;
+    in property <int> iron-mine-count: 0;
+    in property <int> tax-index: 3;
+    in property <int> food-ratio-index: 2;
+    in property <string> tax-label: "";
+    in property <string> food-ratio-label: "";
+    in property <int> total-popularity: 0;
+    in property <bool> popularity-good: true;
+    in property <string> population-worker-summary: "";
+    in property <string> population-economy-summary: "";
 
     callback place-at(float, float);
     callback hover-at(float, float);
@@ -391,6 +552,13 @@ export component MainWindow inherits Window {
     callback open-recent-project();
     callback save-project();
     callback save-project-as();
+    callback set-population(float);
+    callback set-max-population(string);
+    callback set-inn-count(string);
+    callback set-stone-quarry-count(string);
+    callback set-iron-mine-count(string);
+    callback set-tax-index(float);
+    callback set-food-ratio-index(float);
 
     private property <length> cell-px: 10px * root.zoom;
     private property <length> map-px: root.map-size * root.cell-px;
@@ -406,6 +574,7 @@ export component MainWindow inherits Window {
     private property <length> map-frame-max-width: 620px;
     private property <length> map-frame-width: min(root.map-panel-width - 20px, root.map-frame-max-width);
     private property <length> map-frame-height: root.map-frame-width / 1.618;
+    private property <length> workspace-top: 58px;
 
     init => { content-scope.focus(); }
 
@@ -433,11 +602,37 @@ export component MainWindow inherits Window {
             }
             return reject;
         }
+
+        Rectangle {
+            x: root.outer-padding;
+            y: 8px;
+            width: root.width - (root.outer-padding * 2);
+            height: 42px;
+            background: transparent;
+
+            HorizontalBox {
+                spacing: 8px;
+
+                Button {
+                    text: root.active-workspace == 0 ? "● Layout Simulator" : "Layout Simulator";
+                    clicked => { root.active-workspace = 0; }
+                }
+
+                Button {
+                    text: root.active-workspace == 1 ? "● Population & Economy" : "Population & Economy";
+                    clicked => { root.active-workspace = 1; }
+                }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+
         assets-panel := Rectangle {
         x: root.outer-padding;
-        y: root.outer-padding;
+        y: root.workspace-top;
         width: root.assets-panel-width;
-        height: root.height - (root.outer-padding * 2);
+        height: root.height - root.workspace-top - root.outer-padding;
+        visible: root.active-workspace == 0;
         border-width: 1px;
         border-color: #c5c5c5;
         border-radius: 8px;
@@ -657,9 +852,10 @@ export component MainWindow inherits Window {
 
     map-panel := Rectangle {
         x: assets-panel.x + assets-panel.width + root.panel-gap;
-        y: root.outer-padding;
+        y: root.workspace-top;
         width: root.map-panel-width;
-        height: root.height - (root.outer-padding * 2);
+        height: root.height - root.workspace-top - root.outer-padding;
+        visible: root.active-workspace == 0;
         border-width: 1px;
         border-color: #c5c5c5;
         border-radius: 8px;
@@ -1090,8 +1286,8 @@ export component MainWindow inherits Window {
 
                     HorizontalBox {
                         spacing: 10px;
-                        min-height: 28px;
-                        max-height: 28px;
+                        min-height: 48px;
+                        max-height: 48px;
 
                         Text {
                             text: "Fear Factor";
@@ -1100,12 +1296,11 @@ export component MainWindow inherits Window {
                             color: #1f2937;
                         }
 
-                        Slider {
+                        SteppedPopularitySlider {
                             horizontal-stretch: 1;
-                            minimum: 0;
-                            maximum: 5;
-                            value: 0 - root.fear-factor;
-                            changed(value) => { root.set-fear-factor(0 - value); }
+                            stop-labels: ["0", "-1", "-2", "-3", "-4", "-5"];
+                            selected-index: 0 - root.fear-factor;
+                            selected(value) => { root.set-fear-factor(0 - value); }
                         }
 
                         Text {
@@ -1232,9 +1427,10 @@ export component MainWindow inherits Window {
 
     placed-panel := Rectangle {
         x: map-panel.x + map-panel.width + root.panel-gap;
-        y: root.outer-padding;
+        y: root.workspace-top;
         width: root.placed-panel-width;
-        height: root.height - (root.outer-padding * 2);
+        height: root.height - root.workspace-top - root.outer-padding;
+        visible: root.active-workspace == 0;
         border-width: 1px;
         border-color: #c5c5c5;
         border-radius: 8px;
@@ -1293,6 +1489,257 @@ export component MainWindow inherits Window {
                 }
             }
         }
+        }
+    }
+
+    population-panel := Rectangle {
+        x: root.outer-padding;
+        y: root.workspace-top;
+        width: root.width - (root.outer-padding * 2);
+        height: root.height - root.workspace-top - root.outer-padding;
+        visible: root.active-workspace == 1;
+        border-width: 1px;
+        border-color: #c5c5c5;
+        border-radius: 8px;
+        background: #ffffff;
+
+        VerticalBox {
+            padding: 16px;
+            spacing: 12px;
+
+            Text {
+                text: "Population & Economy Calculator";
+                font-size: 24px;
+                font-weight: 700;
+                color: #1f2937;
+                min-height: 32px;
+                max-height: 32px;
+            }
+
+            Text {
+                text: "Additional calculation using the current layout, production settings, and fear factor";
+                color: #64748b;
+                min-height: 22px;
+                max-height: 22px;
+            }
+
+            HorizontalBox {
+                spacing: 12px;
+                vertical-stretch: 1;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-width: 1px;
+                    border-color: #d3d9e2;
+                    border-radius: 8px;
+                    background: #f8fafc;
+
+                    VerticalBox {
+                        padding: 14px;
+                        spacing: 10px;
+
+                        Text {
+                            text: "Population & policy";
+                            font-size: 18px;
+                            font-weight: 700;
+                            color: #1f2937;
+                            min-height: 24px;
+                            max-height: 24px;
+                        }
+
+                        NumberSetting {
+                            title: "Population slider maximum";
+                            value: root.population-max;
+                            submitted(text) => { root.set-max-population(text); }
+                        }
+
+                        Text {
+                            text: "Current population: " + root.population-current + " / " + root.population-max;
+                            color: #1f2937;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }
+
+                        Rectangle {
+                            min-height: 50px;
+                            max-height: 50px;
+                            background: transparent;
+
+                            Slider {
+                                x: 0px;
+                                y: 12px;
+                                width: parent.width;
+                                height: 34px;
+                                minimum: 0;
+                                maximum: max(1, root.population-max);
+                                value: root.population-current;
+                                changed(value) => { root.set-population(value); }
+                            }
+
+                            Rectangle {
+                                x: min(
+                                    parent.width - 3px,
+                                    (root.population-workers * 1.0 / max(1, root.population-max)) * parent.width,
+                                );
+                                y: 1px;
+                                width: 3px;
+                                height: 15px;
+                                background: #dc2626;
+                            }
+                        }
+
+                        Text {
+                            text: "Red marker: " + root.population-workers + " workers required by the economy";
+                            color: #64748b;
+                            font-size: 11px;
+                            min-height: 18px;
+                            max-height: 18px;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: "Tax";
+                            font-weight: 700;
+                            color: #1f2937;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }
+
+                        SteppedPopularitySlider {
+                            stop-labels: ["+7", "+5", "+3", "+1", "-2", "-4", "-6", "-8", "-12", "-16", "-20", "-24"];
+                            selected-index: root.tax-index;
+                            selected(value) => { root.set-tax-index(value); }
+                        }
+
+                        Text {
+                            text: root.tax-label;
+                            color: #374151;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }
+
+                        Text {
+                            text: "Food ratio";
+                            font-weight: 700;
+                            color: #1f2937;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }
+
+                        SteppedPopularitySlider {
+                            stop-labels: ["-8", "-4", "0", "+4", "+8"];
+                            selected-index: root.food-ratio-index;
+                            selected(value) => { root.set-food-ratio-index(value); }
+                        }
+
+                        Text {
+                            text: root.food-ratio-label;
+                            color: #374151;
+                            min-height: 20px;
+                            max-height: 20px;
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-width: 1px;
+                    border-color: #d3d9e2;
+                    border-radius: 8px;
+                    background: #f8fafc;
+
+                    VerticalBox {
+                        padding: 14px;
+                        spacing: 10px;
+
+                        Text {
+                            text: "Additional buildings";
+                            font-size: 18px;
+                            font-weight: 700;
+                            color: #1f2937;
+                            min-height: 24px;
+                            max-height: 24px;
+                        }
+
+                        NumberSetting {
+                            title: "Inns (20 wood + 100 gold, 1 worker each)";
+                            value: root.inn-count;
+                            submitted(text) => { root.set-inn-count(text); }
+                        }
+
+                        NumberSetting {
+                            title: "Stone quarries + oxen (25 wood, 4 workers each)";
+                            value: root.stone-quarry-count;
+                            submitted(text) => { root.set-stone-quarry-count(text); }
+                        }
+
+                        NumberSetting {
+                            title: "Iron mines (20 wood, 2 workers each)";
+                            value: root.iron-mine-count;
+                            submitted(text) => { root.set-iron-mine-count(text); }
+                        }
+
+                        Text {
+                            text: "Press Enter after editing a building count.";
+                            color: #64748b;
+                            font-size: 11px;
+                            min-height: 18px;
+                            max-height: 18px;
+                        }
+
+                        TextEdit {
+                            vertical-stretch: 1;
+                            text: root.population-worker-summary;
+                            read-only: true;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-width: 1px;
+                    border-color: #d3d9e2;
+                    border-radius: 8px;
+                    background: #f8fafc;
+
+                    VerticalBox {
+                        padding: 14px;
+                        spacing: 10px;
+
+                        Rectangle {
+                            min-height: 78px;
+                            max-height: 78px;
+                            border-radius: 8px;
+                            background: root.popularity-good ? #dcfce7 : #fee2e2;
+                            border-width: 1px;
+                            border-color: root.popularity-good ? #16a34a : #dc2626;
+
+                            Text {
+                                width: 100%;
+                                height: 100%;
+                                text: "Total popularity: " + (root.total-popularity >= 0 ? "+" : "") + root.total-popularity;
+                                color: root.popularity-good ? #166534 : #991b1b;
+                                font-size: 22px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TextEdit {
+                            vertical-stretch: 1;
+                            text: root.population-economy-summary;
+                            read-only: true;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
         }
     }
 }

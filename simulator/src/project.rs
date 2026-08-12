@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BuildingPlacement, BuildingType, EntryPoint, Footprint, SimulationSettings, Simulator,
-    SimulatorError, StockpileResource, WallSegment,
+    BuildingPlacement, BuildingType, EntryPoint, Footprint, PopulationEconomySettings,
+    SimulationSettings, Simulator, SimulatorError, StockpileResource, WallSegment,
 };
 
 pub const PROJECT_FORMAT_VERSION: u32 = 1;
@@ -16,6 +16,8 @@ pub struct ProjectFile {
     pub buildings: Vec<SavedBuilding>,
     pub walls: Vec<WallSegment>,
     pub simulation: SimulationSettings,
+    #[serde(default)]
+    pub population_economy: PopulationEconomySettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +32,11 @@ pub struct SavedBuilding {
 }
 
 impl ProjectFile {
-    pub fn capture(simulator: &Simulator, simulation: SimulationSettings) -> Self {
+    pub fn capture(
+        simulator: &Simulator,
+        simulation: SimulationSettings,
+        population_economy: PopulationEconomySettings,
+    ) -> Self {
         Self {
             version: PROJECT_FORMAT_VERSION,
             map_size: simulator.map_size(),
@@ -41,10 +47,13 @@ impl ProjectFile {
                 .collect(),
             walls: simulator.walls().to_vec(),
             simulation,
+            population_economy,
         }
     }
 
-    pub fn into_simulator(self) -> Result<(Simulator, SimulationSettings), SimulatorError> {
+    pub fn into_simulator(
+        self,
+    ) -> Result<(Simulator, SimulationSettings, PopulationEconomySettings), SimulatorError> {
         if self.version != PROJECT_FORMAT_VERSION {
             return Err(SimulatorError::UnsupportedProjectVersion {
                 version: self.version,
@@ -52,7 +61,11 @@ impl ProjectFile {
         }
 
         let simulator = Simulator::from_saved_layout(self.map_size, self.buildings, self.walls)?;
-        Ok((simulator, self.simulation))
+        Ok((
+            simulator,
+            self.simulation,
+            self.population_economy.normalized(),
+        ))
     }
 }
 
@@ -110,7 +123,9 @@ pub(crate) fn validate_unique_ids(
 
 #[cfg(test)]
 mod tests {
-    use crate::{BuildingType, SimulationSettings, Simulator, StockpileResource};
+    use crate::{
+        BuildingType, PopulationEconomySettings, SimulationSettings, Simulator, StockpileResource,
+    };
 
     use super::{ProjectFile, SavedBuilding};
 
@@ -136,10 +151,15 @@ mod tests {
             optimized_fletcher_routing: true,
             ..SimulationSettings::default()
         };
-        let original = ProjectFile::capture(&simulator, settings);
+        let population_economy = PopulationEconomySettings {
+            population: 123,
+            inn_count: 2,
+            ..PopulationEconomySettings::default()
+        };
+        let original = ProjectFile::capture(&simulator, settings, population_economy);
         let json = serde_json::to_string_pretty(&original).expect("project should serialize");
         let decoded: ProjectFile = serde_json::from_str(&json).expect("project should deserialize");
-        let (mut restored, restored_settings) = decoded
+        let (mut restored, restored_settings, restored_population_economy) = decoded
             .into_simulator()
             .expect("saved layout should restore");
 
@@ -150,6 +170,7 @@ mod tests {
             assert_eq!(SavedBuilding::from(actual), SavedBuilding::from(expected));
         }
         assert_eq!(restored_settings, settings);
+        assert_eq!(restored_population_economy, population_economy);
         assert!(!restored.distances().is_empty());
         assert!(!restored.worker_distances().is_empty());
 
@@ -168,7 +189,11 @@ mod tests {
     #[test]
     fn older_json_defaults_new_resource_buy_options_to_disabled() {
         let simulator = Simulator::new(20).expect("simulator should be created");
-        let project = ProjectFile::capture(&simulator, SimulationSettings::default());
+        let project = ProjectFile::capture(
+            &simulator,
+            SimulationSettings::default(),
+            PopulationEconomySettings::default(),
+        );
         let mut json = serde_json::to_value(project).expect("project should serialize");
         let simulation = json["simulation"]
             .as_object_mut()
@@ -180,5 +205,26 @@ mod tests {
             serde_json::from_value(json).expect("older project should deserialize");
         assert!(!decoded.simulation.buy_wheat);
         assert!(!decoded.simulation.buy_flour);
+    }
+
+    #[test]
+    fn older_json_defaults_population_economy_settings() {
+        let simulator = Simulator::new(20).expect("simulator should be created");
+        let project = ProjectFile::capture(
+            &simulator,
+            SimulationSettings::default(),
+            PopulationEconomySettings::default(),
+        );
+        let mut json = serde_json::to_value(project).expect("project should serialize");
+        json.as_object_mut()
+            .expect("project should be an object")
+            .remove("population_economy");
+
+        let decoded: ProjectFile =
+            serde_json::from_value(json).expect("older project should deserialize");
+        assert_eq!(
+            decoded.population_economy,
+            PopulationEconomySettings::default()
+        );
     }
 }

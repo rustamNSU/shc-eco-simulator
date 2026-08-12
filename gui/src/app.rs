@@ -410,6 +410,110 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak_window = window.as_weak();
+    let state_for_population = Arc::clone(&state);
+    window.on_set_population(move |value| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_population
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.set_population(value);
+            refresh_view(&window, &state, "Population updated");
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_max_population = Arc::clone(&state);
+    window.on_set_max_population(move |text| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_max_population
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            match parse_count(text.as_str(), "maximum population") {
+                Ok(value) => {
+                    state.set_max_population(value);
+                    refresh_view(&window, &state, "Population scale updated");
+                }
+                Err(error) => window.set_status_text(error.into()),
+            }
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_inns = Arc::clone(&state);
+    window.on_set_inn_count(move |text| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_inns
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            match parse_count(text.as_str(), "inn count") {
+                Ok(value) => {
+                    state.set_inn_count(value);
+                    refresh_view(&window, &state, "Inn count updated");
+                }
+                Err(error) => window.set_status_text(error.into()),
+            }
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_stone = Arc::clone(&state);
+    window.on_set_stone_quarry_count(move |text| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_stone
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            match parse_count(text.as_str(), "stone quarry count") {
+                Ok(value) => {
+                    state.set_stone_quarry_count(value);
+                    refresh_view(&window, &state, "Stone quarry count updated");
+                }
+                Err(error) => window.set_status_text(error.into()),
+            }
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_iron_mines = Arc::clone(&state);
+    window.on_set_iron_mine_count(move |text| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_iron_mines
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            match parse_count(text.as_str(), "iron mine count") {
+                Ok(value) => {
+                    state.set_iron_mine_count(value);
+                    refresh_view(&window, &state, "Iron mine count updated");
+                }
+                Err(error) => window.set_status_text(error.into()),
+            }
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_tax = Arc::clone(&state);
+    window.on_set_tax_index(move |value| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_tax
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.set_tax_index(value);
+            refresh_view(&window, &state, "Tax level updated");
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_food_ratio = Arc::clone(&state);
+    window.on_set_food_ratio_index(move |value| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_food_ratio
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.set_food_ratio_index(value);
+            refresh_view(&window, &state, "Food ratio updated");
+        }
+    });
+
+    let weak_window = window.as_weak();
     let state_for_tooltips = Arc::clone(&state);
     window.on_set_simulation_tooltips_enabled(move |enabled| {
         if let Some(window) = weak_window.upgrade() {
@@ -533,7 +637,11 @@ fn save_project(
         let state = state
             .lock()
             .expect("editor state lock should not be poisoned");
-        simulator::ProjectFile::capture(state.simulator(), state.simulation_settings())
+        simulator::ProjectFile::capture(
+            state.simulator(),
+            state.simulation_settings(),
+            state.population_economy_settings(),
+        )
     };
 
     let mut session = project_session
@@ -572,7 +680,7 @@ fn handle_open_result(
         return;
     };
 
-    let (simulator, settings) = match project.into_simulator() {
+    let (simulator, settings, population_economy_settings) = match project.into_simulator() {
         Ok(project) => project,
         Err(error) => {
             window.set_status_text(format!("Open failed: {error}").into());
@@ -590,6 +698,7 @@ fn handle_open_result(
             .lock()
             .expect("editor state lock should not be poisoned");
         state.set_simulation_settings(settings);
+        state.set_population_economy_settings(population_economy_settings);
         state.clear_selection();
         refresh_view(window, &state, "Opening project...");
     }
@@ -628,6 +737,12 @@ fn buy_setting_message(resource: &str, enabled: bool, changed: bool) -> &'static
         ("Flour", _, false) => "Buy Flour unchanged",
         _ => "Buy setting unchanged",
     }
+}
+
+fn parse_count(text: &str, label: &str) -> Result<u32, String> {
+    text.trim()
+        .parse::<u32>()
+        .map_err(|_| format!("{label} must be a non-negative whole number"))
 }
 
 fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
@@ -777,6 +892,148 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
             .collect::<Vec<_>>(),
     );
     window.set_simulation_info_lines(ModelRc::new(info_model));
+    refresh_population_economy_view(window, state);
+}
+
+fn refresh_population_economy_view(window: &MainWindow, state: &EditorState) {
+    let report = build_population_economy_report(state);
+    let settings = report.settings;
+    window.set_population_max(settings.max_population as i32);
+    window.set_population_current(settings.population as i32);
+    window.set_population_workers(report.total_workers as i32);
+    window.set_inn_count(settings.inn_count as i32);
+    window.set_stone_quarry_count(settings.stone_quarry_count as i32);
+    window.set_iron_mine_count(settings.iron_mine_count as i32);
+    window.set_tax_index(i32::from(settings.tax_index));
+    window.set_food_ratio_index(i32::from(settings.food_ratio_index));
+    window.set_tax_label(
+        format!(
+            "Popularity {:+} | coefficient {:.1}",
+            report.tax.popularity, report.tax.coefficient
+        )
+        .into(),
+    );
+    window.set_food_ratio_label(
+        format!(
+            "{} | popularity {:+} | {:.1}x food",
+            report.food_ratio.name, report.food_ratio.popularity, report.food_ratio.multiplier
+        )
+        .into(),
+    );
+    window.set_total_popularity(report.total_popularity);
+    window.set_popularity_good(report.total_popularity >= 0);
+    window.set_population_worker_summary(build_population_worker_summary(&report).into());
+    window.set_population_economy_summary(build_population_economy_summary(&report).into());
+}
+
+fn build_population_economy_report(state: &EditorState) -> simulator::PopulationEconomyReport {
+    let bread = state
+        .simulator()
+        .calculate_bread_economy(state.simulation_settings());
+    let workshop_gold_per_minute = state
+        .cycle_rows()
+        .iter()
+        .filter_map(|row| {
+            let total_ticks = row.total_ticks?;
+            Some(net_gold_per_minute(row, state, total_ticks))
+        })
+        .sum::<f64>();
+    let workshop_iron_demand_per_minute = state
+        .cycle_rows()
+        .iter()
+        .filter_map(|row| {
+            let total_ticks = row.total_ticks?;
+            Some(
+                f64::from(row.iron_per_cycle) / total_ticks as f64
+                    * f64::from(state.game_speed())
+                    * 60.0,
+            )
+        })
+        .sum::<f64>();
+
+    simulator::calculate_population_economy(
+        state.population_economy_settings(),
+        simulator::PopulationEconomyContext {
+            game_speed_ticks_per_second: state.game_speed(),
+            fear_factor: state.fear_factor(),
+            placed_workers: placed_economy_workers(state),
+            food_produced_per_minute: bread.bread_per_minute,
+            food_sell_gold_per_unit: BREAD_SELL_GOLD,
+            layout_gold_per_minute: workshop_gold_per_minute
+                + bread_economy_gold_per_minute(&bread),
+            workshop_iron_demand_per_minute,
+            workshops_buy_iron: state.buy_iron(),
+        },
+    )
+}
+
+fn placed_economy_workers(state: &EditorState) -> u32 {
+    state
+        .simulator()
+        .buildings()
+        .iter()
+        .map(|building| match building.building_type {
+            BuildingType::Windmill => 3,
+            BuildingType::WheatFarm
+            | BuildingType::Bakery
+            | BuildingType::FletchersWorkshop
+            | BuildingType::BlacksmithsWorkshop
+            | BuildingType::PoleturnersWorkshop
+            | BuildingType::ArmourersWorkshop => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+fn build_population_worker_summary(report: &simulator::PopulationEconomyReport) -> String {
+    let available = report
+        .settings
+        .population
+        .saturating_sub(report.total_workers);
+    let shortage = report
+        .total_workers
+        .saturating_sub(report.settings.population);
+    let availability = if shortage > 0 {
+        format!("Worker shortage: {shortage}")
+    } else {
+        format!("Free population: {available}")
+    };
+
+    format!(
+        "Workers\nPlaced economy: {}\nAdditional buildings: {}\nTotal workers: {} / {} population\n{}",
+        report.placed_workers,
+        report.additional_workers,
+        report.total_workers,
+        report.settings.population,
+        availability
+    )
+}
+
+fn build_population_economy_summary(report: &simulator::PopulationEconomyReport) -> String {
+    format!(
+        "Popularity\nTax: {:+}\nFood: {:+}\nInns: {:+} ({:.1}% coverage)\nFear factor: {:+}\n\nFood\nRequired: {:.2} / min\nBread available: {:.2} / min\nBread consumed: {:.2} / min\nBread left to sell: {:.2} / min\nBalance: {:+.2} / min\n\nProduction\nStone: {:.2} / min\nIron: {:.2} / min\n\nGold\nLayout tab result: {:.2} / min\nConsumed bread not sold: -{:.2} / min\nLayout after food: {:.2} / min\nTax: {:+.2} / min\nIron mine benefit: {:.2} / min\nInn beer: -{:.2} / min\nTotal: {:.2} / min\n\nAdditional setup: {} wood + {} gold",
+        report.tax.popularity,
+        report.food_ratio.popularity,
+        report.inn_popularity,
+        report.inn_coverage_percent,
+        report.fear_popularity,
+        report.food_required_per_minute,
+        report.food_produced_per_minute,
+        report.food_consumed_per_minute,
+        report.food_sellable_per_minute,
+        report.food_balance_per_minute,
+        report.stone_per_minute,
+        report.iron_per_minute,
+        report.layout_gold_per_minute,
+        report.food_sale_reduction_per_minute,
+        report.layout_gold_after_food_per_minute,
+        report.tax_gold_per_minute,
+        report.iron_gold_benefit_per_minute,
+        report.inn_gold_per_minute,
+        report.total_gold_per_minute,
+        report.additional_build_wood,
+        report.additional_build_gold
+    )
 }
 
 fn weapon_id(weapon: WeaponType) -> &'static str {
