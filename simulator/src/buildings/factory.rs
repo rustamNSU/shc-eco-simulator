@@ -21,7 +21,7 @@ impl BuildingFactory {
         }
     }
 
-    pub fn create(&mut self, building_type: BuildingType, x: usize, y: usize) -> BuildingPlacement {
+    pub fn create(&mut self, building_type: BuildingType, x: i32, y: i32) -> BuildingPlacement {
         let placement = BuildingPlacement {
             id: self.next_id,
             building_type,
@@ -37,15 +37,11 @@ impl BuildingFactory {
         placement
     }
 
-    pub fn create_goods_yard_stacks(
-        &mut self,
-        x: usize,
-        y: usize,
-    ) -> (u32, Vec<BuildingPlacement>) {
+    pub fn create_goods_yard_stacks(&mut self, x: i32, y: i32) -> (u32, Vec<BuildingPlacement>) {
         let group_id = self.next_goods_yard_group_id;
         self.next_goods_yard_group_id += 1;
 
-        let mut create_stack = |stack_x: usize, stack_y: usize| {
+        let mut create_stack = |stack_x: i32, stack_y: i32| {
             let placement = BuildingPlacement {
                 id: self.next_id,
                 building_type: BuildingType::Stockpile,

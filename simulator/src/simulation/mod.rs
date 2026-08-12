@@ -19,8 +19,9 @@ pub use game_time::GameTime;
 pub use population_economy::{
     DEFAULT_MAX_POPULATION, FOOD_PER_PERSON_PER_MINUTE, FOOD_RATIOS, FoodRatio, GAME_MONTH_TICKS,
     INN_CAPACITY, INN_GOLD_PER_MINUTE, INN_WORKERS, IRON_MINE_WORKERS, IRON_PER_MINUTE,
-    IRON_SELL_GOLD, PopulationEconomyContext, PopulationEconomyReport, PopulationEconomySettings,
-    STONE_PER_MINUTE, STONE_WORKERS, TAX_LEVELS, TaxLevel, calculate_population_economy,
+    IRON_SELL_GOLD, IronEconomy, PopulationEconomyContext, PopulationEconomyReport,
+    PopulationEconomySettings, STONE_PER_MINUTE, STONE_SELL_GOLD, STONE_WORKERS, TAX_LEVELS,
+    TaxLevel, calculate_iron_economy, calculate_population_economy,
 };
 pub use production_cycle::{
     IRON_BUY_GOLD, ProductionCycle, ProductionCycleError, ProductionRouteUsage, SimulationSettings,

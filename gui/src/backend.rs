@@ -1,35 +1,36 @@
 use std::{sync::mpsc, thread};
 
 use simulator::{
-    BuildingType, ProductionCycle, RemoveOutcome, SimulationSettings, Simulator, StockpileResource,
-    WeaponType,
+    BuildingType, MapBounds, ProductionCycle, RemoveOutcome, SimulationSettings, Simulator,
+    StockpileResource, WeaponType,
 };
 
 #[derive(Debug)]
 pub enum BackendCommand {
     PlaceBuilding {
         building_type: BuildingType,
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
     },
     PlaceWall {
-        start: (usize, usize),
-        end: (usize, usize),
+        start: (i32, i32),
+        end: (i32, i32),
     },
     RemoveAt {
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
     },
     RemoveAll,
     RemoveAllWalls,
     Undo,
     Redo,
     LoadProject {
-        simulator: Simulator,
+        simulator: Box<Simulator>,
+        settings: SimulationSettings,
     },
     SetStockpileResource {
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
         resource: StockpileResource,
     },
     RunCycleSimulation {
@@ -57,6 +58,7 @@ pub struct BackendUpdate {
     pub simulator: Simulator,
     pub message: String,
     pub cycle_rows: Option<Vec<CycleSimulationRow>>,
+    pub geometry_changed: bool,
 }
 
 #[derive(Clone)]
@@ -97,55 +99,74 @@ fn run_backend(
             return;
         }
     };
+    simulator.set_defer_path_calculation(true);
     let mut history = MapHistory::default();
+    let mut paths_stale = true;
 
     for command in receiver {
-        let (message, cycle_rows) = match command {
+        let (message, cycle_rows, geometry_changed) = match command {
             BackendCommand::PlaceBuilding {
                 building_type,
                 x,
                 y,
             } => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
+                let previous_bounds = previous.map_bounds();
+                let result = simulator.place_building(building_type, x, y);
+                let changed = result.is_ok();
                 (
-                    match simulator.place_building(building_type, x, y) {
+                    match result {
                         Ok(id) => {
+                            let expansion =
+                                canvas_expansion_message(previous_bounds, simulator.map_bounds());
                             history.record(previous);
                             format!(
-                                "Placed {} #{} at ({}, {})",
+                                "Placed {} #{} at ({}, {}){}",
                                 building_type.display_name(),
                                 id,
                                 x,
-                                y
+                                y,
+                                expansion,
                             )
                         }
                         Err(error) => format!("Placement failed: {}", error),
                     },
                     None,
+                    changed,
                 )
             }
             BackendCommand::PlaceWall { start, end } => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
+                let previous_bounds = previous.map_bounds();
+                let result = simulator.place_wall(start.0, start.1, end.0, end.1);
+                let changed = result.is_ok();
                 (
-                    match simulator.place_wall(start.0, start.1, end.0, end.1) {
+                    match result {
                         Ok(id) => {
+                            let expansion =
+                                canvas_expansion_message(previous_bounds, simulator.map_bounds());
                             history.record(previous);
                             format!(
-                                "Placed Wall #{} from ({}, {}) to ({}, {})",
-                                id, start.0, start.1, end.0, end.1
+                                "Placed Wall #{} from ({}, {}) to ({}, {}){}",
+                                id, start.0, start.1, end.0, end.1, expansion,
                             )
                         }
                         Err(error) => format!("Placement failed: {}", error),
                     },
                     None,
+                    changed,
                 )
             }
             BackendCommand::RemoveAt { x, y } => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
                 let outcome = simulator.remove_at(x, y);
                 if outcome != RemoveOutcome::None {
                     history.record(previous);
                 }
+                let changed = outcome != RemoveOutcome::None;
                 (
                     match outcome {
                         RemoveOutcome::None => "Nothing to remove at this cell".to_string(),
@@ -168,9 +189,11 @@ fn run_backend(
                         }
                     },
                     None,
+                    changed,
                 )
             }
             BackendCommand::RemoveAll => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
                 let (building_count, wall_count) = simulator.remove_all();
                 if building_count > 0 || wall_count > 0 {
@@ -188,9 +211,11 @@ fn run_backend(
                         }
                     },
                     None,
+                    building_count > 0 || wall_count > 0,
                 )
             }
             BackendCommand::RemoveAllWalls => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
                 let removed = simulator.remove_all_walls();
                 if removed > 0 {
@@ -205,12 +230,16 @@ fn run_backend(
                         }
                     },
                     None,
+                    removed > 0,
                 )
             }
             BackendCommand::SetStockpileResource { x, y, resource } => {
+                simulator.set_defer_path_calculation(true);
                 let previous = simulator.clone();
+                let result = simulator.set_stockpile_resource_at(x, y, resource);
+                let changed = result.is_ok();
                 (
-                    match simulator.set_stockpile_resource_at(x, y, resource) {
+                    match result {
                         Ok(id) => {
                             history.record(previous);
                             format!("Marked stockpile #{} as {}", id, resource.display_name())
@@ -218,33 +247,62 @@ fn run_backend(
                         Err(error) => format!("Placement failed: {}", error),
                     },
                     None,
+                    changed,
                 )
             }
-            BackendCommand::Undo => (
-                if history.undo(&mut simulator) {
-                    "Undid last map change".to_string()
-                } else {
-                    "Nothing to undo".to_string()
-                },
-                None,
-            ),
-            BackendCommand::Redo => (
-                if history.redo(&mut simulator) {
-                    "Redid map change".to_string()
-                } else {
-                    "Nothing to redo".to_string()
-                },
-                None,
-            ),
+            BackendCommand::Undo => {
+                let changed = history.undo(&mut simulator);
+                (
+                    if changed {
+                        "Undid last map change".to_string()
+                    } else {
+                        "Nothing to undo".to_string()
+                    },
+                    None,
+                    changed,
+                )
+            }
+            BackendCommand::Redo => {
+                let changed = history.redo(&mut simulator);
+                (
+                    if changed {
+                        "Redid map change".to_string()
+                    } else {
+                        "Nothing to redo".to_string()
+                    },
+                    None,
+                    changed,
+                )
+            }
             BackendCommand::LoadProject {
                 simulator: loaded_simulator,
+                settings,
             } => {
-                simulator = loaded_simulator;
+                simulator = *loaded_simulator;
+                simulator.set_defer_path_calculation(true);
                 history = MapHistory::default();
-                ("Project opened".to_string(), Some(Vec::new()))
+                simulator.calculate_worker_distances();
+                paths_stale = false;
+                let cycle_rows = build_cycle_simulation_rows(&simulator, settings);
+                let success_count = cycle_rows
+                    .iter()
+                    .filter(|row| row.total_ticks.is_some())
+                    .count();
+                (
+                    format!(
+                        "Project opened; calculated {} workshop cycle(s), {} ready",
+                        cycle_rows.len(),
+                        success_count
+                    ),
+                    Some(cycle_rows),
+                    false,
+                )
             }
             BackendCommand::RunCycleSimulation { settings } => {
-                simulator.calculate_worker_distances();
+                if paths_stale {
+                    simulator.calculate_worker_distances();
+                    paths_stale = false;
+                }
                 let cycle_rows = build_cycle_simulation_rows(&simulator, settings);
                 let success_count = cycle_rows
                     .iter()
@@ -257,16 +315,36 @@ fn run_backend(
                         success_count
                     ),
                     Some(cycle_rows),
+                    false,
                 )
             }
         };
+
+        if geometry_changed {
+            paths_stale = true;
+        }
 
         on_update(BackendUpdate {
             simulator: simulator.clone(),
             message,
             cycle_rows,
+            geometry_changed,
         });
     }
+}
+
+fn canvas_expansion_message(previous: MapBounds, current: MapBounds) -> String {
+    if previous == current {
+        return String::new();
+    }
+
+    format!(
+        "; canvas expanded to X {}..{}, Y {}..{}",
+        current.min_x,
+        current.max_x - 1,
+        current.min_y,
+        current.max_y - 1,
+    )
 }
 
 #[derive(Default)]
@@ -422,9 +500,42 @@ fn build_cycle_row(
 
 #[cfg(test)]
 mod tests {
-    use simulator::{BuildingType, EntryPoint, Simulator};
+    use std::{sync::mpsc, time::Duration};
 
-    use super::MapHistory;
+    use simulator::{BuildingType, EntryPoint, MapBounds, SimulationSettings, Simulator};
+
+    use super::{BackendCommand, BackendHandle, MapHistory};
+
+    #[test]
+    fn loading_project_immediately_returns_fresh_calculation_rows() {
+        let simulator = Simulator::new(20).expect("simulator should be created");
+        let settings = SimulationSettings {
+            game_speed_ticks_per_second: 65,
+            fear_factor: -3,
+            ..SimulationSettings::default()
+        };
+        let (update_sender, update_receiver) = mpsc::channel();
+        let backend = BackendHandle::spawn(20, move |update| {
+            update_sender
+                .send(update)
+                .expect("test update receiver should be available");
+        })
+        .expect("backend should start");
+
+        backend
+            .send(BackendCommand::LoadProject {
+                simulator: Box::new(simulator),
+                settings,
+            })
+            .expect("load command should be accepted");
+
+        let update = update_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("calculated load update should arrive");
+        assert!(update.cycle_rows.is_some());
+        assert!(!update.geometry_changed);
+        assert!(update.message.contains("Project opened; calculated"));
+    }
 
     #[test]
     fn history_restores_complete_map_snapshots_and_clears_redo_after_edit() {
@@ -468,5 +579,36 @@ mod tests {
         history.record(previous);
 
         assert!(!history.redo(&mut simulator));
+    }
+
+    #[test]
+    fn history_restores_canvas_expansion_with_the_placement() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        let initial_bounds = simulator.map_bounds();
+        let mut history = MapHistory::default();
+
+        let previous = simulator.clone();
+        simulator
+            .place_building(BuildingType::Armoury, 0, 0)
+            .expect("edge placement should succeed");
+        history.record(previous);
+
+        assert_eq!(
+            simulator.map_bounds(),
+            MapBounds {
+                min_x: -50,
+                min_y: -50,
+                max_x: 70,
+                max_y: 70,
+            }
+        );
+        assert!(history.undo(&mut simulator));
+        assert_eq!(simulator.map_bounds(), initial_bounds);
+        assert!(simulator.buildings().is_empty());
+
+        assert!(history.redo(&mut simulator));
+        assert_eq!(simulator.map_bounds().min_x, -50);
+        assert_eq!(simulator.map_bounds().min_y, -50);
+        assert_eq!(simulator.buildings().len(), 1);
     }
 }

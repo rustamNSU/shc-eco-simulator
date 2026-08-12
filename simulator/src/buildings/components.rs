@@ -9,8 +9,8 @@ pub enum BuildingComponentType {
 pub struct BuildingComponent {
     pub id: u8,
     pub component_type: BuildingComponentType,
-    pub x: usize,
-    pub y: usize,
+    pub x: i32,
+    pub y: i32,
     pub size: usize,
     pub entry_point: Option<EntryPoint>,
 }

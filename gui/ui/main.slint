@@ -6,14 +6,6 @@ export struct OccupiedCellVisual {
     color: color,
 }
 
-export struct BuildingListItem {
-    id: int,
-    name: string,
-    x: int,
-    y: int,
-    color: color,
-}
-
 export struct MapMarker {
     x: int,
     y: int,
@@ -50,6 +42,7 @@ component BuildingButton inherits Rectangle {
     callback selected(string);
 
     min-height: 72px;
+    max-height: 72px;
     border-width: 2px;
     border-radius: 8px;
     border-color: selected-id == building-id ? #3465d9 : #8a8a8a;
@@ -157,14 +150,15 @@ component SimulationToggleButton inherits Rectangle {
 
 component PrimaryActionButton inherits Rectangle {
     in property <string> title;
+    in property <bool> attention: false;
     callback pressed();
 
     min-width: 150px;
     height: 34px;
     border-width: 1px;
-    border-color: #1f5fa8;
+    border-color: root.attention ? #991b1b : #1f5fa8;
     border-radius: 6px;
-    background: #256fb8;
+    background: root.attention ? #dc2626 : #256fb8;
 
     Text {
         width: 100%;
@@ -251,11 +245,13 @@ component BuyResourceToggle inherits Rectangle {
 component SteppedPopularitySlider inherits Rectangle {
     in property <[string]> stop-labels;
     in property <float> selected-index;
+    in property <bool> control-enabled: true;
     callback selected(float);
 
     min-height: 52px;
     max-height: 52px;
     background: transparent;
+    opacity: root.control-enabled ? 1 : 0.42;
 
     private property <length> rail-padding: 10px;
     private property <length> rail-width: max(1px, root.width - root.rail-padding * 2);
@@ -337,6 +333,7 @@ component SteppedPopularitySlider inherits Rectangle {
     }
 
     TouchArea {
+        enabled: root.control-enabled;
         width: 100%;
         height: 34px;
 
@@ -365,10 +362,11 @@ component SteppedPopularitySlider inherits Rectangle {
 component NumberSetting inherits Rectangle {
     in property <string> title;
     in property <int> value;
+    in property <bool> control-enabled: true;
     callback submitted(string);
 
-    min-height: 58px;
-    max-height: 58px;
+    min-height: 34px;
+    max-height: 34px;
     border-width: 1px;
     border-color: #d3d9e2;
     border-radius: 6px;
@@ -376,18 +374,21 @@ component NumberSetting inherits Rectangle {
 
     Text {
         x: 10px;
-        y: 5px;
-        width: parent.width - 20px;
-        height: 18px;
+        y: 0px;
+        width: parent.width - 112px;
+        height: 100%;
         text: root.title;
-        color: #374151;
-        font-size: 12px;
+        color: root.control-enabled ? #374151 : #9ca3af;
+        font-size: 11px;
+        vertical-alignment: center;
+        overflow: elide;
     }
 
     LineEdit {
-        x: 10px;
-        y: 26px;
-        width: parent.width - 20px;
+        enabled: root.control-enabled;
+        x: parent.width - 98px;
+        y: 4px;
+        width: 88px;
         height: 26px;
         text: "" + root.value;
         accepted => { root.submitted(self.text); }
@@ -406,6 +407,7 @@ component ToolButton inherits Rectangle {
     callback selected(string);
 
     min-height: 56px;
+    max-height: 56px;
     border-width: 2px;
     border-radius: 8px;
     border-color: selected-id == tool-id ? #3465d9 : #8a8a8a;
@@ -467,20 +469,26 @@ component ToolButton inherits Rectangle {
 }
 
 export component MainWindow inherits Window {
-    preferred-width: 1280px;
+    preferred-width: 1360px;
     preferred-height: 940px;
-    min-width: 1068px;
+    min-width: 1360px;
     min-height: 820px;
     title: "SHC Eco Simulator - " + root.current-project-name;
 
-    in property <int> map-size: 100;
+    in property <int> map-min-x: 0;
+    in property <int> map-min-y: 0;
+    in property <int> map-max-x: 100;
+    in property <int> map-max-y: 100;
+    in property <int> map-width: 100;
+    in property <int> map-height: 100;
+    in-out property <length> canvas-pan-x: 0px;
+    in-out property <length> canvas-pan-y: 0px;
     in-out property <float> zoom: 1.0;
     in-out property <string> selected-building: "";
     in-out property <string> status-text: "Ready";
     in property <[OccupiedCellVisual]> occupied-cells;
     in property <[OccupiedCellVisual]> preview-cells;
     in property <[OccupiedCellVisual]> no-entry-cells;
-    in property <[BuildingListItem]> placed-buildings;
     in property <[BuildingBoundary]> building-boundaries;
     in property <[MapMarker]> anchor-labels;
     in property <[MapMarker]> entry-labels;
@@ -489,7 +497,7 @@ export component MainWindow inherits Window {
     in property <string> simulation-info-title: "";
     in property <string> simulation-info-subtitle: "";
     in property <[SimulationInfoLine]> simulation-info-lines;
-    in-out property <bool> simulation-tooltips-enabled: false;
+    in-out property <bool> simulation-tooltips-enabled: true;
     in-out property <bool> simulation-tooltip-visible: false;
     in-out property <int> simulation-tooltip-x: 0;
     in-out property <int> simulation-tooltip-y: 0;
@@ -511,7 +519,9 @@ export component MainWindow inherits Window {
     in-out property <string> blacksmiths-weapon: "sword";
     in property <string> current-project-name: "Untitled";
     in property <string> recent-project-name: "";
-    in-out property <int> active-workspace: 0;
+    private property <int> active-workspace: 0;
+    in-out property <bool> population-economy-enabled: false;
+    in property <bool> simulation-results-stale: true;
     in property <int> population-max: 500;
     in property <int> population-current: 0;
     in property <int> population-workers: 0;
@@ -553,6 +563,7 @@ export component MainWindow inherits Window {
     callback save-project();
     callback save-project-as();
     callback set-population(float);
+    callback set-population-economy-enabled(bool);
     callback set-max-population(string);
     callback set-inn-count(string);
     callback set-stone-quarry-count(string);
@@ -561,53 +572,79 @@ export component MainWindow inherits Window {
     callback set-food-ratio-index(float);
 
     private property <length> cell-px: 10px * root.zoom;
-    private property <length> map-px: root.map-size * root.cell-px;
-    private property <int> grid-count: root.map-size + 1;
+    private property <length> map-width-px: root.map-width * root.cell-px;
+    private property <length> map-height-px: root.map-height * root.cell-px;
+    private property <int> grid-x-count: root.map-width + 1;
+    private property <int> grid-y-count: root.map-height + 1;
 
     private property <length> outer-padding: 12px;
     private property <length> panel-gap: 12px;
-    private property <length> assets-panel-width: 280px;
-    private property <length> placed-panel-width: 320px;
-    private property <length> map-panel-width:
-        root.width - root.assets-panel-width - root.placed-panel-width
-        - (root.outer-padding * 2) - (root.panel-gap * 2);
-    private property <length> map-frame-max-width: 620px;
-    private property <length> map-frame-width: min(root.map-panel-width - 20px, root.map-frame-max-width);
-    private property <length> map-frame-height: root.map-frame-width / 1.618;
-    private property <length> workspace-top: 58px;
+    private property <length> assets-panel-width: 250px;
+    private property <length> info-panel-width: 360px;
+    private property <length> map-panel-width: 700px;
+    private property <length> map-frame-width: root.map-panel-width - 20px;
+    private property <length> map-frame-height: 430px;
+    private property <length> workspace-top: 12px;
 
     init => { content-scope.focus(); }
+
+    MenuBar {
+        Menu {
+            title: "File";
+
+            MenuItem {
+                title: "Open…";
+                shortcut: @keys(Control + O);
+                activated => { root.open-project(); }
+            }
+
+            MenuItem {
+                title: "Open Recent";
+                enabled: root.recent-project-name != "";
+                activated => { root.open-recent-project(); }
+            }
+
+            MenuItem {
+                title: "Save";
+                shortcut: @keys(Control + S);
+                activated => { root.save-project(); }
+            }
+
+            MenuItem {
+                title: "Save As…";
+                shortcut: @keys(Control + Shift + S);
+                activated => { root.save-project-as(); }
+            }
+        }
+
+        Menu {
+            title: "Edit";
+
+            MenuItem {
+                title: "Undo";
+                shortcut: @keys(Control + Z);
+                activated => { root.undo(); }
+            }
+
+            MenuItem {
+                title: "Redo";
+                shortcut: @keys(Control + Y);
+                activated => { root.redo(); }
+            }
+        }
+    }
 
     content-scope := FocusScope {
         width: 100%;
         height: 100%;
         focus-on-click: false;
 
-        capture-key-pressed(event) => {
-            if event.modifiers.control && (event.text == "z" || event.text == "Z") {
-                root.undo();
-                return accept;
-            }
-            if event.modifiers.control && (event.text == "y" || event.text == "Y") {
-                root.redo();
-                return accept;
-            }
-            if event.modifiers.control && (event.text == "s" || event.text == "S") {
-                root.save-project();
-                return accept;
-            }
-            if event.modifiers.control && (event.text == "o" || event.text == "O") {
-                root.open-project();
-                return accept;
-            }
-            return reject;
-        }
-
         Rectangle {
             x: root.outer-padding;
             y: 8px;
             width: root.width - (root.outer-padding * 2);
             height: 42px;
+            visible: false;
             background: transparent;
 
             HorizontalBox {
@@ -637,6 +674,7 @@ export component MainWindow inherits Window {
         border-color: #c5c5c5;
         border-radius: 8px;
         background: #ffffff;
+        clip: true;
 
         VerticalBox {
             padding: 10px;
@@ -647,48 +685,25 @@ export component MainWindow inherits Window {
                 border-color: #d9d9d9;
                 border-radius: 6px;
                 background: #fafafa;
-                min-height: 480px;
+                min-height: 296px;
+                max-height: 296px;
 
                 VerticalBox {
                     padding: 8px;
                     spacing: 8px;
 
-                    CheckBox {
-                        checked <=> root.show-entry-points;
-                        text: "Plot entry points";
-                    }
-
-                    CheckBox {
-                        checked: root.simulation-tooltips-enabled;
-                        text: "Show tooltips";
-                        toggled => { root.set-simulation-tooltips-enabled(self.checked); }
-                    }
-
-                    CheckBox {
-                        checked: root.optimize-fletcher-routing;
-                        text: "Optimize Fletcher";
-                        toggled => { root.set-optimize-fletcher-routing(self.checked); }
-                    }
-
-                    Button {
-                        text: "Remove All Walls";
-                        horizontal-stretch: 1;
-                        clicked => { root.remove-all-walls(); }
-                    }
-
-                    Button {
-                        text: "Remove All";
-                        horizontal-stretch: 1;
-                        clicked => { root.remove-all(); }
-                    }
-
-                    Button {
-                        text: "Remove";
-                        clicked => { root.select-building("remove"); }
+                    Text {
+                        text: "Assign Stockpile Resource";
+                        min-height: 24px;
+                        max-height: 24px;
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: #1f2937;
+                        vertical-alignment: center;
                     }
 
                     ToolButton {
-                        title: "Wood Stock";
+                        title: "Wood";
                         tool-id: "set_wood_stock";
                         selected-id: root.selected-building;
                         map-color: #c4965c;
@@ -699,7 +714,7 @@ export component MainWindow inherits Window {
                     }
 
                     ToolButton {
-                        title: "Iron Stock";
+                        title: "Iron";
                         tool-id: "set_iron_stock";
                         selected-id: root.selected-building;
                         map-color: #aaaab2;
@@ -710,7 +725,7 @@ export component MainWindow inherits Window {
                     }
 
                     ToolButton {
-                        title: "Wheat Stock";
+                        title: "Wheat";
                         tool-id: "set_wheat_stock";
                         selected-id: root.selected-building;
                         map-color: #d4b849;
@@ -721,7 +736,7 @@ export component MainWindow inherits Window {
                     }
 
                     ToolButton {
-                        title: "Flour Stock";
+                        title: "Flour";
                         tool-id: "set_flour_stock";
                         selected-id: root.selected-building;
                         map-color: #e8e0c4;
@@ -860,64 +875,94 @@ export component MainWindow inherits Window {
         border-color: #c5c5c5;
         border-radius: 8px;
         background: #ffffff;
+        clip: true;
 
         VerticalBox {
             padding: 10px;
             spacing: 8px;
 
-            HorizontalBox {
-                spacing: 8px;
+            Rectangle {
+                min-height: 42px;
+                max-height: 42px;
+                background: transparent;
+                clip: true;
 
                 Button {
-                    text: "Open";
-                    clicked => { root.open-project(); }
-                }
-
-                Button {
-                    enabled: root.recent-project-name != "";
-                    text: root.recent-project-name == "" ? "Recent" : "Recent: " + root.recent-project-name;
-                    clicked => { root.open-recent-project(); }
-                }
-
-                Button {
-                    text: "Save (Ctrl+S)";
-                    clicked => { root.save-project(); }
-                }
-
-                Button {
-                    text: "Save As";
-                    clicked => { root.save-project-as(); }
-                }
-            }
-
-            HorizontalBox {
-                spacing: 8px;
-
-                Button {
+                    x: 0px;
+                    y: 4px;
+                    width: 34px;
+                    height: 34px;
                     text: "-";
                     clicked => { root.adjust-zoom(-0.1); }
                 }
 
                 Button {
+                    x: 40px;
+                    y: 4px;
+                    width: 34px;
+                    height: 34px;
                     text: "+";
                     clicked => { root.adjust-zoom(0.1); }
                 }
 
-                Button {
-                    text: "Undo (Ctrl+Z)";
-                    clicked => { root.undo(); }
-                }
-
-                Button {
-                    text: "Redo (Ctrl+Y)";
-                    clicked => { root.redo(); }
-                }
-
                 Text {
+                    x: 82px;
+                    y: 0px;
+                    width: 76px;
+                    height: 42px;
                     vertical-alignment: center;
                     text: "Zoom: " + (root.zoom * 100) + "%";
                 }
 
+                Button {
+                    x: 166px;
+                    y: 4px;
+                    width: 74px;
+                    height: 34px;
+                    text: "Remove";
+                    clicked => {
+                        canvas-key-scope.focus();
+                        root.select-building("remove");
+                    }
+                }
+
+                Button {
+                    x: 248px;
+                    y: 4px;
+                    width: 118px;
+                    height: 34px;
+                    text: "Remove All Walls";
+                    clicked => {
+                        canvas-key-scope.focus();
+                        root.remove-all-walls();
+                    }
+                }
+
+                Button {
+                    x: 374px;
+                    y: 4px;
+                    width: 90px;
+                    height: 34px;
+                    text: "Remove All";
+                    clicked => {
+                        canvas-key-scope.focus();
+                        root.remove-all();
+                    }
+                }
+
+                Text {
+                    x: parent.width - 170px;
+                    y: 0px;
+                    width: 160px;
+                    height: 42px;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                    color: #475569;
+                    font-size: 11px;
+                    overflow: elide;
+                    text: "X " + root.map-min-x + ".." + (root.map-max-x - 1)
+                        + "   Y " + root.map-min-y + ".." + (root.map-max-y - 1);
+                }
             }
 
             HorizontalBox {
@@ -934,45 +979,64 @@ export component MainWindow inherits Window {
                     border-radius: 8px;
                     background: #f2f4f6;
 
-                    map-scroll := ScrollView {
+                    canvas-key-scope := FocusScope {
                         width: 100%;
                         height: 100%;
-                        viewport-width: root.map-px;
-                        viewport-height: root.map-px;
+                        focus-on-click: false;
+
+                        capture-key-pressed(event) => {
+                            if event.modifiers.control && (event.text == "z" || event.text == "Z") {
+                                root.undo();
+                                return accept;
+                            }
+                            if event.modifiers.control && (event.text == "y" || event.text == "Y") {
+                                root.redo();
+                                return accept;
+                            }
+                            return reject;
+                        }
+
+                        map-scroll := ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: root.map-width-px;
+                        viewport-height: root.map-height-px;
+                        viewport-x <=> root.canvas-pan-x;
+                        viewport-y <=> root.canvas-pan-y;
                         mouse-drag-pan-enabled: false;
 
                         Rectangle {
-                            width: root.map-px;
-                            height: root.map-px;
+                            width: root.map-width-px;
+                            height: root.map-height-px;
                             background: #f8f8f8;
 
-                            for x in root.grid-count: Rectangle {
+                            for x in root.grid-x-count: Rectangle {
                                 x: x * root.cell-px;
                                 y: 0px;
                                 width: 1px;
-                                height: root.map-px;
+                                height: root.map-height-px;
                                 background: #d8d8d8;
                             }
 
-                            for y in root.grid-count: Rectangle {
+                            for y in root.grid-y-count: Rectangle {
                                 x: 0px;
                                 y: y * root.cell-px;
-                                width: root.map-px;
+                                width: root.map-width-px;
                                 height: 1px;
                                 background: #d8d8d8;
                             }
 
                             for cell in root.occupied-cells: Rectangle {
-                                x: cell.x * root.cell-px;
-                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                x: (cell.x - root.map-min-x) * root.cell-px;
+                                y: (root.map-max-y - cell.y - 1) * root.cell-px;
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: cell.color;
                             }
 
                             for cell in root.preview-cells: Rectangle {
-                                x: cell.x * root.cell-px;
-                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                x: (cell.x - root.map-min-x) * root.cell-px;
+                                y: (root.map-max-y - cell.y - 1) * root.cell-px;
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: cell.color;
@@ -981,27 +1045,27 @@ export component MainWindow inherits Window {
                             for boundary in root.building-boundaries: Rectangle {
                                 property <length> line-width: max(1px, root.cell-px / 6);
                                 x: boundary.horizontal
-                                    ? boundary.x * root.cell-px
-                                    : boundary.x * root.cell-px - (self.line-width / 2);
+                                    ? (boundary.x - root.map-min-x) * root.cell-px
+                                    : (boundary.x - root.map-min-x) * root.cell-px - (self.line-width / 2);
                                 y: boundary.horizontal
-                                    ? (root.map-size - boundary.y) * root.cell-px - (self.line-width / 2)
-                                    : (root.map-size - boundary.y - 1) * root.cell-px;
+                                    ? (root.map-max-y - boundary.y) * root.cell-px - (self.line-width / 2)
+                                    : (root.map-max-y - boundary.y - 1) * root.cell-px;
                                 width: boundary.horizontal ? root.cell-px : self.line-width;
                                 height: boundary.horizontal ? self.line-width : root.cell-px;
                                 background: #111111;
                             }
 
                             for label in root.anchor-labels: Text {
-                                x: label.x * root.cell-px + 1px;
-                                y: (root.map-size - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
+                                x: (label.x - root.map-min-x) * root.cell-px + 1px;
+                                y: (root.map-max-y - label.y - 1) * root.cell-px + max(0px, root.cell-px - 11px);
                                 text: label.text;
                                 color: label.color;
                                 font-size: 10px;
                             }
 
                             for label in root.entry-labels: Rectangle {
-                                x: label.x * root.cell-px;
-                                y: (root.map-size - label.y - 1) * root.cell-px;
+                                x: (label.x - root.map-min-x) * root.cell-px;
+                                y: (root.map-max-y - label.y - 1) * root.cell-px;
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: label.bg;
@@ -1017,8 +1081,8 @@ export component MainWindow inherits Window {
                             }
 
                             for label in root.resource-labels: Rectangle {
-                                x: label.x * root.cell-px;
-                                y: (root.map-size - label.y - 1) * root.cell-px;
+                                x: (label.x - root.map-min-x) * root.cell-px;
+                                y: (root.map-max-y - label.y - 1) * root.cell-px;
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: label.bg;
@@ -1033,8 +1097,8 @@ export component MainWindow inherits Window {
                             }
 
                             for cell in root.no-entry-cells: Rectangle {
-                                x: cell.x * root.cell-px;
-                                y: (root.map-size - cell.y - 1) * root.cell-px;
+                                x: (cell.x - root.map-min-x) * root.cell-px;
+                                y: (root.map-max-y - cell.y - 1) * root.cell-px;
                                 width: max(1px, root.cell-px - 1px);
                                 height: max(1px, root.cell-px - 1px);
                                 background: cell.color;
@@ -1066,14 +1130,14 @@ export component MainWindow inherits Window {
                                 map-scroll.viewport-x = min(
                                     0px,
                                     max(
-                                        map-scroll.visible-width - root.map-px,
+                                        map-scroll.visible-width - root.map-width-px,
                                         self.start-viewport-x + dx,
                                     ),
                                 );
                                 map-scroll.viewport-y = min(
                                     0px,
                                     max(
-                                        map-scroll.visible-height - root.map-px,
+                                        map-scroll.visible-height - root.map-height-px,
                                         self.start-viewport-y + dy,
                                     ),
                                 );
@@ -1083,12 +1147,13 @@ export component MainWindow inherits Window {
                         pointer-event(event) => {
                             if event.kind == PointerEventKind.move && !self.pan-active {
                                 root.hover-at(
-                                    (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
-                                    (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
+                                    root.map-min-x + (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
+                                    root.map-max-y - (self.mouse-y - map-scroll.viewport-y) / root.cell-px,
                                 );
                             }
 
                             if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                canvas-key-scope.focus();
                                 self.start-mouse-x = self.mouse-x;
                                 self.start-mouse-y = self.mouse-y;
                                 self.start-viewport-x = map-scroll.viewport-x;
@@ -1100,8 +1165,8 @@ export component MainWindow inherits Window {
                             if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
                                 if !self.was-dragging {
                                     root.place-at(
-                                        (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
-                                        (root.map-px - (self.mouse-y - map-scroll.viewport-y)) / root.cell-px,
+                                        root.map-min-x + (self.mouse-x - map-scroll.viewport-x) / root.cell-px,
+                                        root.map-max-y - (self.mouse-y - map-scroll.viewport-y) / root.cell-px,
                                     );
                                 }
                                 self.pan-active = false;
@@ -1169,6 +1234,7 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
+                    }
                 }
 
                 Rectangle {
@@ -1217,7 +1283,8 @@ export component MainWindow inherits Window {
                         }
 
                         PrimaryActionButton {
-                            title: "Calculate Average";
+                            title: root.simulation-results-stale ? "Recalculate" : "Calculate Average";
+                            attention: root.simulation-results-stale;
                             pressed => { root.run-simulation(); }
                         }
                     }
@@ -1312,106 +1379,45 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    HorizontalBox {
-                        spacing: 8px;
-                        min-height: 42px;
-                        max-height: 42px;
+                    VerticalBox {
+                        spacing: 6px;
+                        min-height: 90px;
+                        max-height: 90px;
 
-                        BuyResourceToggle {
-                            title: "Buy Wood";
-                            icon: @image-url("../assets/goods/wood.png");
-                            checked: root.buy-wood;
-                            changed(value) => { root.set-buy-wood(value); }
-                        }
+                        HorizontalBox {
+                            spacing: 8px;
 
-                        BuyResourceToggle {
-                            title: "Buy Iron";
-                            icon: @image-url("../assets/goods/iron.png");
-                            checked: root.buy-iron;
-                            changed(value) => { root.set-buy-iron(value); }
-                        }
+                            BuyResourceToggle {
+                                title: "Buy Wood";
+                                icon: @image-url("../assets/goods/wood.png");
+                                checked: root.buy-wood;
+                                changed(value) => { root.set-buy-wood(value); }
+                            }
 
-                        BuyResourceToggle {
-                            title: "Buy Wheat";
-                            icon: @image-url("../assets/goods/wheat.png");
-                            checked: root.buy-wheat;
-                            changed(value) => { root.set-buy-wheat(value); }
-                        }
-
-                        BuyResourceToggle {
-                            title: "Buy Flour";
-                            icon: @image-url("../assets/goods/flour.png");
-                            checked: root.buy-flour;
-                            changed(value) => { root.set-buy-flour(value); }
-                        }
-                    }
-
-                    Rectangle {
-                        min-height: 34px;
-                        max-height: 34px;
-                        border-width: 1px;
-                        border-color: #d3d9e2;
-                        border-radius: 6px;
-                        background: #fbfcfe;
-
-                        Text {
-                            x: 10px;
-                            y: 0px;
-                            width: parent.width - 20px;
-                            height: 100%;
-                            text: root.eco-setup-cost;
-                            color: #374151;
-                            font-size: 12px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                    }
-
-                    HorizontalBox {
-                        spacing: 8px;
-                        min-height: 114px;
-                        max-height: 114px;
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-width: 1px;
-                            border-color: #d3d9e2;
-                            border-radius: 6px;
-                            background: #fbfcfe;
-
-                            HorizontalBox {
-                                padding: 10px;
-                                spacing: 10px;
-
-                                Text {
-                                    horizontal-stretch: 1;
-                                    text: root.workshop-count-summary;
-                                    color: #374151;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
-
-                                Rectangle {
-                                    width: 1px;
-                                    background: #d3d9e2;
-                                }
-
-                                Text {
-                                    horizontal-stretch: 1;
-                                    text: root.bread-count-summary;
-                                    color: #374151;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
+                            BuyResourceToggle {
+                                title: "Buy Iron";
+                                icon: @image-url("../assets/goods/iron.png");
+                                checked: root.buy-iron;
+                                changed(value) => { root.set-buy-iron(value); }
                             }
                         }
 
-                        TextEdit {
-                            horizontal-stretch: 1;
-                            text: root.armoury-summary;
-                            read-only: true;
-                            font-size: 12px;
-                            wrap: word-wrap;
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            BuyResourceToggle {
+                                title: "Buy Wheat";
+                                icon: @image-url("../assets/goods/wheat.png");
+                                checked: root.buy-wheat;
+                                changed(value) => { root.set-buy-wheat(value); }
+                            }
+
+                            BuyResourceToggle {
+                                title: "Buy Flour";
+                                icon: @image-url("../assets/goods/flour.png");
+                                checked: root.buy-flour;
+                                changed(value) => { root.set-buy-flour(value); }
+                            }
                         }
                     }
 
@@ -1425,12 +1431,11 @@ export component MainWindow inherits Window {
         }
     }
 
-    placed-panel := Rectangle {
+    info-panel := Rectangle {
         x: map-panel.x + map-panel.width + root.panel-gap;
         y: root.workspace-top;
-        width: root.placed-panel-width;
+        width: root.info-panel-width;
         height: root.height - root.workspace-top - root.outer-padding;
-        visible: root.active-workspace == 0;
         border-width: 1px;
         border-color: #c5c5c5;
         border-radius: 8px;
@@ -1441,54 +1446,190 @@ export component MainWindow inherits Window {
             spacing: 8px;
 
             Text {
-                text: "Placed Buildings";
-                font-size: 22px;
+                text: "Settings & Economy";
+                font-size: 20px;
                 font-weight: 700;
+                color: #1f2937;
             }
 
-            Text {
-                text: "Order of placement";
-                color: #666666;
+            CheckBox {
+                min-height: 24px;
+                max-height: 24px;
+                checked <=> root.show-entry-points;
+                text: "Show building entry points";
             }
 
-            ScrollView {
-                width: 100%;
+            CheckBox {
+                min-height: 24px;
+                max-height: 24px;
+                checked: root.simulation-tooltips-enabled;
+                text: "Show simulation tooltips";
+                toggled => { root.set-simulation-tooltips-enabled(self.checked); }
+            }
+
+            CheckBox {
+                min-height: 24px;
+                max-height: 24px;
+                checked: root.optimize-fletcher-routing;
+                text: "Optimize Fletcher routing";
+                toggled => { root.set-optimize-fletcher-routing(self.checked); }
+            }
+
+            CheckBox {
+                min-height: 24px;
+                max-height: 24px;
+                checked: root.population-economy-enabled;
+                text: "Count population economy";
+                toggled => { root.set-population-economy-enabled(self.checked); }
+            }
+
+            VerticalBox {
                 vertical-stretch: 1;
+                spacing: 6px;
 
-                VerticalBox {
-                    width: 100%;
-                    spacing: 6px;
+                    Rectangle {
+                        min-height: 1px;
+                        max-height: 1px;
+                        background: #d3d9e2;
+                    }
 
-                    for item in root.placed-buildings: Rectangle {
-                        min-height: 56px;
-                        border-width: 1px;
-                        border-color: #d0d0d0;
+                    Text {
+                        text: "Additional resources";
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: #1f2937;
+                    }
+
+                    NumberSetting {
+                        title: "Stone quarries + oxen";
+                        value: root.stone-quarry-count;
+                        submitted(text) => { root.set-stone-quarry-count(text); }
+                    }
+
+                    NumberSetting {
+                        title: "Iron mines (requires Iron Stock)";
+                        value: root.iron-mine-count;
+                        submitted(text) => { root.set-iron-mine-count(text); }
+                    }
+
+                    Text {
+                        text: "Population, inns, food & tax";
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: root.population-economy-enabled ? #1f2937 : #9ca3af;
+                    }
+
+                    NumberSetting {
+                        title: "Inns";
+                        value: root.inn-count;
+                        control-enabled: root.population-economy-enabled;
+                        submitted(text) => { root.set-inn-count(text); }
+                    }
+
+                    NumberSetting {
+                        title: "Population slider maximum";
+                        value: root.population-max;
+                        control-enabled: root.population-economy-enabled;
+                        submitted(text) => { root.set-max-population(text); }
+                    }
+
+                    Text {
+                        text: "Population: " + root.population-current + " / " + root.population-max
+                            + " | workers: " + root.population-workers;
+                        color: root.population-economy-enabled ? #374151 : #9ca3af;
+                        font-size: 11px;
+                    }
+
+                    Slider {
+                        enabled: root.population-economy-enabled;
+                        opacity: root.population-economy-enabled ? 1 : 0.42;
+                        minimum: 0;
+                        maximum: max(1, root.population-max);
+                        value: root.population-current;
+                        changed(value) => { root.set-population(value); }
+                    }
+
+                    Text {
+                        text: "Tax";
+                        font-weight: 700;
+                        color: root.population-economy-enabled ? #374151 : #9ca3af;
+                    }
+
+                    SteppedPopularitySlider {
+                        stop-labels: ["+7", "+5", "+3", "+1", "-2", "-4", "-6", "-8", "-12", "-16", "-20", "-24"];
+                        selected-index: root.tax-index;
+                        control-enabled: root.population-economy-enabled;
+                        selected(value) => { root.set-tax-index(value); }
+                    }
+
+                    Text {
+                        text: root.tax-label;
+                        color: root.population-economy-enabled ? #475569 : #9ca3af;
+                        font-size: 11px;
+                    }
+
+                    Text {
+                        text: "Food ratio";
+                        font-weight: 700;
+                        color: root.population-economy-enabled ? #374151 : #9ca3af;
+                    }
+
+                    SteppedPopularitySlider {
+                        stop-labels: ["-8", "-4", "0", "+4", "+8"];
+                        selected-index: root.food-ratio-index;
+                        control-enabled: root.population-economy-enabled;
+                        selected(value) => { root.set-food-ratio-index(value); }
+                    }
+
+                    Text {
+                        text: root.food-ratio-label;
+                        color: root.population-economy-enabled ? #475569 : #9ca3af;
+                        font-size: 11px;
+                    }
+
+                    Rectangle {
+                        min-height: 54px;
+                        max-height: 54px;
                         border-radius: 6px;
-                        background: #f9f9f9;
+                        border-width: 1px;
+                        border-color: root.population-economy-enabled
+                            ? (root.popularity-good ? #16a34a : #dc2626)
+                            : #d1d5db;
+                        background: root.population-economy-enabled
+                            ? (root.popularity-good ? #dcfce7 : #fee2e2)
+                            : #f3f4f6;
 
-                        HorizontalBox {
-                            padding: 8px;
-                            spacing: 8px;
-
-                            Rectangle {
-                                width: 16px;
-                                height: 16px;
-                                border-width: 1px;
-                                border-color: #666666;
-                                border-radius: 3px;
-                                background: item.color;
-                            }
-
-                            VerticalBox {
-                                spacing: 2px;
-                                Text { text: "#" + item.id + " " + item.name; }
-                                Text { text: "(" + item.x + ", " + item.y + ")"; color: #666666; }
-                            }
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: root.population-economy-enabled
+                                ? "Total popularity: " + (root.total-popularity >= 0 ? "+" : "") + root.total-popularity
+                                : "Population economy not counted";
+                            color: root.population-economy-enabled
+                                ? (root.popularity-good ? #166534 : #991b1b)
+                                : #6b7280;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
-                }
+
+                    Text {
+                        text: "Complete economy report";
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: #1f2937;
+                    }
+
+                    TextEdit {
+                        vertical-stretch: 1;
+                        min-height: 150px;
+                        text: root.population-economy-summary;
+                        read-only: true;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
             }
-        }
         }
     }
 
@@ -1497,7 +1638,7 @@ export component MainWindow inherits Window {
         y: root.workspace-top;
         width: root.width - (root.outer-padding * 2);
         height: root.height - root.workspace-top - root.outer-padding;
-        visible: root.active-workspace == 1;
+        visible: false;
         border-width: 1px;
         border-color: #c5c5c5;
         border-radius: 8px;
@@ -1742,4 +1883,5 @@ export component MainWindow inherits Window {
             }
         }
     }
+}
 }

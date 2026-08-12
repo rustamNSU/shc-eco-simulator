@@ -8,8 +8,8 @@ pub(crate) fn calculate_building_entry(
     map: &CellMap,
     walls: &[WallSegment],
     building_type: BuildingType,
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
 ) -> Option<EntryPoint> {
     if building_type == BuildingType::GoodsYard {
@@ -31,8 +31,8 @@ pub(crate) fn calculate_building_entry(
 
 pub(crate) fn resolve_entry_point_for_square(
     map: &CellMap,
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
     rotation_steps: usize,
 ) -> Option<EntryPoint> {
@@ -48,23 +48,17 @@ pub(crate) fn resolve_entry_point_for_square(
 
 fn first_available(map: &CellMap, cells: Vec<(i32, i32)>) -> Option<EntryPoint> {
     for (cx, cy) in cells {
-        if cx < 0 || cy < 0 {
-            continue;
-        }
-
-        let ux = cx as usize;
-        let uy = cy as usize;
-        if map.is_in_bounds(ux, uy) && !map.is_blocked(ux, uy) {
-            return Some(EntryPoint { x: ux, y: uy });
+        if map.is_in_bounds(cx, cy) && !map.is_blocked(cx, cy) {
+            return Some(EntryPoint { x: cx, y: cy });
         }
     }
 
     None
 }
 
-fn workshop_wall_rotation_steps(walls: &[WallSegment], x: usize, y: usize, size: usize) -> usize {
-    let xi = x as i32;
-    let yi = y as i32;
+fn workshop_wall_rotation_steps(walls: &[WallSegment], x: i32, y: i32, size: usize) -> usize {
+    let xi = x;
+    let yi = y;
     let ni = size as i32;
 
     if side_has_wall_contact(walls, (xi..(xi + ni)).map(|cx| (cx, yi + ni)).collect()) {
@@ -88,28 +82,22 @@ fn side_has_wall_contact(walls: &[WallSegment], cells: Vec<(i32, i32)>) -> bool 
 }
 
 fn is_wall_at(walls: &[WallSegment], x: i32, y: i32) -> bool {
-    if x < 0 || y < 0 {
-        return false;
-    }
-
-    let ux = x as usize;
-    let uy = y as usize;
-    walls.iter().any(|wall| wall_contains_cell(wall, ux, uy))
+    walls.iter().any(|wall| wall_contains_cell(wall, x, y))
 }
 
 fn default_entry_cell_rotated(
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
     rotation_steps: usize,
 ) -> Option<(i32, i32)> {
-    if y == 0 || size == 0 {
+    if size == 0 {
         return None;
     }
 
     let offset = if size == 2 { 0 } else { (size / 2) as i32 };
-    let xi = x as i32;
-    let yi = y as i32;
+    let xi = x;
+    let yi = y;
     let ni = size as i32;
     let mirrored_offset = ni - 1 - offset;
 
@@ -122,8 +110,8 @@ fn default_entry_cell_rotated(
 }
 
 fn side_perimeter_cells_clockwise(
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
     start: Option<(i32, i32)>,
 ) -> Vec<(i32, i32)> {
@@ -131,8 +119,8 @@ fn side_perimeter_cells_clockwise(
         return Vec::new();
     }
 
-    let xi = x as i32;
-    let yi = y as i32;
+    let xi = x;
+    let yi = y;
     let ni = size as i32;
     let top = yi + ni;
     let right = xi + ni;
@@ -162,13 +150,13 @@ fn side_perimeter_cells_clockwise(
 }
 
 fn corner_cells_clockwise_from_bottom_right(
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
     rotation_steps: usize,
 ) -> Vec<(i32, i32)> {
-    let xi = x as i32;
-    let yi = y as i32;
+    let xi = x;
+    let yi = y;
     let ni = size as i32;
 
     let mut corners = vec![
@@ -182,7 +170,7 @@ fn corner_cells_clockwise_from_bottom_right(
     corners
 }
 
-pub(crate) fn wall_contains_cell(wall: &WallSegment, x: usize, y: usize) -> bool {
+pub(crate) fn wall_contains_cell(wall: &WallSegment, x: i32, y: i32) -> bool {
     if wall.start_x == wall.end_x {
         if x != wall.start_x {
             return false;

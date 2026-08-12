@@ -56,16 +56,16 @@ pub(crate) fn shortest_path_len(
         return None;
     }
 
-    let size = map.size();
-    let mut dist = vec![u32::MAX; size * size];
+    let width = map.width();
+    let mut dist = vec![u32::MAX; width * map.height()];
     let mut queue = VecDeque::new();
 
-    let start_idx = start.y * size + start.x;
+    let start_idx = map.index(start.x, start.y)?;
     dist[start_idx] = 0;
     queue.push_back((start.x, start.y));
 
     while let Some((x, y)) = queue.pop_front() {
-        let current_dist = dist[y * size + x];
+        let current_dist = dist[map.index(x, y)?];
 
         for dy in -1i32..=1 {
             for dx in -1i32..=1 {
@@ -73,30 +73,24 @@ pub(crate) fn shortest_path_len(
                     continue;
                 }
 
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx < 0 || ny < 0 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if !map.is_in_bounds(nx, ny) || map.is_blocked(nx, ny) {
                     continue;
                 }
 
-                let ux = nx as usize;
-                let uy = ny as usize;
-                if !map.is_in_bounds(ux, uy) || map.is_blocked(ux, uy) {
-                    continue;
-                }
-
-                let next_idx = uy * size + ux;
+                let next_idx = map.index(nx, ny)?;
                 if dist[next_idx] != u32::MAX {
                     continue;
                 }
 
                 let next_dist = current_dist + 1;
-                if ux == finish.x && uy == finish.y {
+                if nx == finish.x && ny == finish.y {
                     return Some(next_dist);
                 }
 
                 dist[next_idx] = next_dist;
-                queue.push_back((ux, uy));
+                queue.push_back((nx, ny));
             }
         }
     }

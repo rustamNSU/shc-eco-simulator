@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     SavedBuilding,
     buildings::{BuildingFactory, BuildingPlacement, BuildingType, StockpileResource},
-    map::{CellMap, MapError},
+    map::{CellMap, MapBounds, MapError},
     project::validate_unique_ids,
     walls::{WallSegment, line_cells},
 };
@@ -31,6 +31,7 @@ pub struct Simulator {
     next_wall_id: u32,
     distances: HashMap<DistanceKey, BuildingDistance>,
     worker_distances: HashMap<DistanceKey, BuildingDistance>,
+    defer_path_calculation: bool,
 }
 
 #[derive(Debug)]
@@ -96,12 +97,15 @@ fn is_entry_point_available(
 
 impl Simulator {
     pub fn new(map_size: usize) -> Result<Self, SimulatorError> {
-        if map_size == 0 {
-            return Err(SimulatorError::InvalidMapSize);
-        }
+        let bounds = MapBounds::square(map_size).ok_or(SimulatorError::InvalidMapSize)?;
+        Self::with_bounds(bounds)
+    }
+
+    pub fn with_bounds(bounds: MapBounds) -> Result<Self, SimulatorError> {
+        let map = CellMap::with_bounds(bounds).ok_or(SimulatorError::InvalidMapSize)?;
 
         Ok(Self {
-            map: CellMap::new(map_size),
+            map,
             factory: BuildingFactory::new(),
             time: GameTime::new(),
             buildings: Vec::new(),
@@ -109,15 +113,16 @@ impl Simulator {
             next_wall_id: 1,
             distances: HashMap::new(),
             worker_distances: HashMap::new(),
+            defer_path_calculation: false,
         })
     }
 
     pub fn from_saved_layout(
-        map_size: usize,
+        bounds: MapBounds,
         saved_buildings: Vec<SavedBuilding>,
         walls: Vec<WallSegment>,
     ) -> Result<Self, SimulatorError> {
-        if map_size == 0 {
+        if !bounds.is_valid() {
             return Err(SimulatorError::InvalidMapSize);
         }
         validate_unique_ids(&saved_buildings, &walls)?;
@@ -146,7 +151,7 @@ impl Simulator {
             .checked_add(1)
             .ok_or(SimulatorError::InvalidProject("wall ID is too large"))?;
 
-        let mut map = CellMap::new(map_size);
+        let mut map = CellMap::with_bounds(bounds).ok_or(SimulatorError::InvalidMapSize)?;
         let buildings = saved_buildings
             .into_iter()
             .map(SavedBuilding::into_placement)
@@ -177,13 +182,26 @@ impl Simulator {
             next_wall_id,
             distances: HashMap::new(),
             worker_distances: HashMap::new(),
+            defer_path_calculation: false,
         };
         simulator.recompute_distances();
         Ok(simulator)
     }
 
     pub fn map_size(&self) -> usize {
-        self.map.size()
+        self.map.width()
+    }
+
+    pub fn map_bounds(&self) -> MapBounds {
+        self.map.bounds()
+    }
+
+    pub fn map_width(&self) -> usize {
+        self.map.width()
+    }
+
+    pub fn map_height(&self) -> usize {
+        self.map.height()
     }
 
     pub fn time(&self) -> GameTime {
@@ -224,15 +242,34 @@ impl Simulator {
             .get(&DistanceKey::new(start_building_id, finish_building_id))
     }
 
-    pub fn is_cell_occupied(&self, x: usize, y: usize) -> bool {
+    pub fn is_cell_occupied(&self, x: i32, y: i32) -> bool {
         self.map.is_occupied(x, y)
     }
 
     pub fn place_building(
         &mut self,
         building_type: BuildingType,
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
+    ) -> Result<u32, SimulatorError> {
+        let footprint = crate::Footprint::for_type(building_type);
+        let mut candidate = self.clone();
+        candidate.ensure_bounds_for_extent(
+            x,
+            y,
+            x + footprint.width() as i32,
+            y + footprint.height() as i32,
+        )?;
+        let id = candidate.place_building_in_bounds(building_type, x, y)?;
+        *self = candidate;
+        Ok(id)
+    }
+
+    fn place_building_in_bounds(
+        &mut self,
+        building_type: BuildingType,
+        x: i32,
+        y: i32,
     ) -> Result<u32, SimulatorError> {
         if building_type == BuildingType::GoodsYard {
             let (_, mut stacks) = self.factory.create_goods_yard_stacks(x, y);
@@ -264,10 +301,29 @@ impl Simulator {
 
     pub fn place_wall(
         &mut self,
-        start_x: usize,
-        start_y: usize,
-        end_x: usize,
-        end_y: usize,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+    ) -> Result<u32, SimulatorError> {
+        let mut candidate = self.clone();
+        candidate.ensure_bounds_for_extent(
+            start_x.min(end_x),
+            start_y.min(end_y),
+            start_x.max(end_x) + 1,
+            start_y.max(end_y) + 1,
+        )?;
+        let id = candidate.place_wall_in_bounds(start_x, start_y, end_x, end_y)?;
+        *self = candidate;
+        Ok(id)
+    }
+
+    fn place_wall_in_bounds(
+        &mut self,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
     ) -> Result<u32, SimulatorError> {
         let wall = WallSegment::new(self.next_wall_id, start_x, start_y, end_x, end_y);
         if !wall.is_axis_aligned() {
@@ -303,7 +359,7 @@ impl Simulator {
         !removed.is_empty()
     }
 
-    pub fn remove_at(&mut self, x: usize, y: usize) -> RemoveOutcome {
+    pub fn remove_at(&mut self, x: i32, y: i32) -> RemoveOutcome {
         if let Some((target_id, goods_yard_group_id)) = self
             .buildings
             .iter()
@@ -371,8 +427,17 @@ impl Simulator {
     }
 
     pub fn calculate_worker_distances(&mut self) -> usize {
-        self.worker_distances = build_worker_distances(&self.buildings, &self.distances);
+        self.distances = recompute_building_distances(&self.buildings, &self.map);
+        self.recompute_worker_distances();
         self.worker_distances.len()
+    }
+
+    pub fn set_defer_path_calculation(&mut self, defer: bool) {
+        self.defer_path_calculation = defer;
+        if defer {
+            self.distances.clear();
+            self.worker_distances.clear();
+        }
     }
 
     pub fn calculate_bread_economy(&self, settings: SimulationSettings) -> BreadEconomyReport {
@@ -444,8 +509,8 @@ impl Simulator {
 
     pub fn set_stockpile_resource_at(
         &mut self,
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
         resource: StockpileResource,
     ) -> Result<u32, SimulatorError> {
         let Some(target_id) = self
@@ -496,6 +561,57 @@ impl Simulator {
                 0,
             );
         }
+    }
+
+    fn ensure_bounds_for_extent(
+        &mut self,
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+    ) -> Result<(), SimulatorError> {
+        const EXPANSION: i32 = 50;
+
+        let mut bounds = self.map.bounds();
+        while i64::from(min_x) - i64::from(bounds.min_x) < i64::from(EXPANSION) {
+            bounds.min_x = bounds
+                .min_x
+                .checked_sub(EXPANSION)
+                .ok_or(SimulatorError::InvalidMapSize)?;
+        }
+        while i64::from(min_y) - i64::from(bounds.min_y) < i64::from(EXPANSION) {
+            bounds.min_y = bounds
+                .min_y
+                .checked_sub(EXPANSION)
+                .ok_or(SimulatorError::InvalidMapSize)?;
+        }
+        while i64::from(bounds.max_x) - i64::from(max_x) < i64::from(EXPANSION) {
+            bounds.max_x = bounds
+                .max_x
+                .checked_add(EXPANSION)
+                .ok_or(SimulatorError::InvalidMapSize)?;
+        }
+        while i64::from(bounds.max_y) - i64::from(max_y) < i64::from(EXPANSION) {
+            bounds.max_y = bounds
+                .max_y
+                .checked_add(EXPANSION)
+                .ok_or(SimulatorError::InvalidMapSize)?;
+        }
+
+        if bounds == self.map.bounds() {
+            return Ok(());
+        }
+
+        let mut expanded_map =
+            CellMap::with_bounds(bounds).ok_or(SimulatorError::InvalidMapSize)?;
+        for building in &self.buildings {
+            expanded_map.place(building)?;
+        }
+        for wall in &self.walls {
+            expanded_map.place_cells(wall.id, wall.cells())?;
+        }
+        self.map = expanded_map;
+        Ok(())
     }
 
     fn refresh_unavailable_entry_points(&mut self) {
@@ -596,6 +712,11 @@ impl Simulator {
     }
 
     fn recompute_distances(&mut self) {
+        if self.defer_path_calculation {
+            self.distances.clear();
+            self.worker_distances.clear();
+            return;
+        }
         self.distances = recompute_building_distances(&self.buildings, &self.map);
         self.recompute_worker_distances();
     }
@@ -703,7 +824,10 @@ impl Simulator {
 
 #[cfg(test)]
 mod tests {
-    use crate::buildings::{BuildingType, EntryPoint, StockpileResource};
+    use crate::{
+        MapBounds,
+        buildings::{BuildingType, EntryPoint, StockpileResource},
+    };
 
     use super::{
         DistanceKey, RemoveOutcome, SimulationSettings, Simulator, SimulatorError, WeaponType,
@@ -876,10 +1000,71 @@ mod tests {
     }
 
     #[test]
-    fn rejects_out_of_bounds() {
+    fn keeps_at_least_fifty_cells_between_a_building_and_every_boundary() {
         let mut simulator = Simulator::new(10).expect("simulator should be created");
-        let result = simulator.place_building(BuildingType::ArmourersWorkshop, 8, 8);
+        simulator
+            .place_building(BuildingType::ArmourersWorkshop, 8, 8)
+            .expect("placement should expand the canvas");
+
+        assert_eq!(
+            simulator.map_bounds(),
+            MapBounds {
+                min_x: -50,
+                min_y: -50,
+                max_x: 110,
+                max_y: 110,
+            }
+        );
+        let building = &simulator.buildings()[0];
+        let bounds = simulator.map_bounds();
+        assert!(building.x - bounds.min_x >= 50);
+        assert!(building.y - bounds.min_y >= 50);
+        assert!(bounds.max_x - (building.x + building.width() as i32) >= 50);
+        assert!(bounds.max_y - (building.y + building.height() as i32) >= 50);
+    }
+
+    #[test]
+    fn expands_when_a_building_is_close_to_but_not_touching_a_boundary() {
+        let mut simulator = Simulator::new(100).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Armoury, 40, 40)
+            .expect("placement should succeed");
+
+        assert_eq!(
+            simulator.map_bounds(),
+            MapBounds {
+                min_x: -50,
+                min_y: -50,
+                max_x: 100,
+                max_y: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn expands_left_and_bottom_and_accepts_negative_coordinates() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Armoury, 0, 0)
+            .expect("edge placement should expand the canvas");
+        simulator
+            .place_building(BuildingType::Bakery, -50, -50)
+            .expect("negative placement should expand the canvas again");
+
+        assert_eq!(simulator.map_bounds().min_x, -100);
+        assert_eq!(simulator.map_bounds().min_y, -100);
+        assert!(simulator.is_cell_occupied(-50, -50));
+    }
+
+    #[test]
+    fn failed_placement_does_not_commit_canvas_expansion() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        let before = simulator.map_bounds();
+
+        let result = simulator.place_wall(-100, -100, 100, 100);
+
         assert!(result.is_err());
+        assert_eq!(simulator.map_bounds(), before);
     }
 
     #[test]
@@ -908,7 +1093,7 @@ mod tests {
             .collect();
         assert_eq!(stockpiles.len(), 4);
 
-        let positions: Vec<(usize, usize)> = stockpiles.iter().map(|s| (s.x, s.y)).collect();
+        let positions: Vec<(i32, i32)> = stockpiles.iter().map(|s| (s.x, s.y)).collect();
         assert!(positions.contains(&(10, 10)));
         assert!(positions.contains(&(13, 10)));
         assert!(positions.contains(&(10, 13)));
@@ -1055,18 +1240,27 @@ mod tests {
     }
 
     #[test]
-    fn wall_can_make_distance_unreachable() {
+    fn walls_can_enclose_a_building_and_make_distance_unreachable() {
         let mut simulator = Simulator::new(20).expect("simulator should be created");
         let start_id = simulator
-            .place_building(BuildingType::FletchersWorkshop, 1, 3)
+            .place_building(BuildingType::FletchersWorkshop, 5, 5)
             .expect("start building should be placed");
         let finish_id = simulator
-            .place_building(BuildingType::Armoury, 12, 3)
+            .place_building(BuildingType::Armoury, 12, 5)
             .expect("finish building should be placed");
 
         simulator
-            .place_wall(8, 0, 8, 19)
-            .expect("blocking wall should be placed");
+            .place_wall(4, 4, 9, 4)
+            .expect("bottom wall should be placed");
+        simulator
+            .place_wall(4, 9, 9, 9)
+            .expect("top wall should be placed");
+        simulator
+            .place_wall(4, 5, 4, 8)
+            .expect("left wall should be placed");
+        simulator
+            .place_wall(9, 5, 9, 8)
+            .expect("right wall should be placed");
 
         let distance = simulator
             .distance_between(start_id, finish_id)
@@ -1408,6 +1602,46 @@ mod tests {
                 .worker_distance_between(armoury_id, iron_stockpile_id)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn deferred_path_calculation_waits_for_explicit_calculate() {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator.set_defer_path_calculation(true);
+        simulator
+            .place_building(BuildingType::GoodsYard, 2, 2)
+            .expect("goods yard should be placed");
+        simulator
+            .place_building(BuildingType::FletchersWorkshop, 10, 2)
+            .expect("workshop should be placed");
+        simulator
+            .place_building(BuildingType::Armoury, 18, 2)
+            .expect("armoury should be placed");
+
+        assert!(simulator.distances().is_empty());
+        assert!(simulator.worker_distances().is_empty());
+
+        assert!(simulator.calculate_worker_distances() > 0);
+        assert!(!simulator.distances().is_empty());
+        assert!(!simulator.worker_distances().is_empty());
+    }
+
+    #[test]
+    fn deferred_mode_keeps_large_layout_edits_free_of_path_recalculation() {
+        let mut simulator = Simulator::new(200).expect("simulator should be created");
+        simulator.set_defer_path_calculation(true);
+
+        for index in 0..120 {
+            let x = 5 + (index % 20) * 7;
+            let y = 5 + (index / 20) * 7;
+            simulator
+                .place_building(BuildingType::Armoury, x, y)
+                .expect("spaced armoury should be placed");
+        }
+
+        assert_eq!(simulator.buildings().len(), 120);
+        assert!(simulator.distances().is_empty());
+        assert!(simulator.worker_distances().is_empty());
     }
 
     #[test]

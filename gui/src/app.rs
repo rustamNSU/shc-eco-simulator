@@ -51,8 +51,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .lock()
                     .expect("editor state lock should not be poisoned");
                 state.set_simulator(update.simulator);
-                state.set_cycle_rows(update.cycle_rows);
-                refresh_view(&window, &state, &update.message);
+                if let Some(cycle_rows) = update.cycle_rows {
+                    state.set_cycle_rows(cycle_rows);
+                    refresh_view(&window, &state, &update.message);
+                } else {
+                    if update.geometry_changed {
+                        state.mark_simulation_results_stale();
+                    }
+                    refresh_geometry_view(&window, &state, &update.message);
+                }
             });
         },
     )?;
@@ -127,7 +134,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 format!("Unknown tool id: {}", tool_id)
             };
-            refresh_view(&window, &state, &message);
+            refresh_geometry_view(&window, &state, &message);
         }
     });
 
@@ -141,7 +148,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("editor state lock should not be poisoned");
             match state.place_selected(x, y) {
                 Ok(PlacementOutcome::Status(message)) => {
-                    refresh_view(&window, &state, &message);
+                    refresh_geometry_view(&window, &state, &message);
                 }
                 Ok(PlacementOutcome::BackendCommand(command)) => {
                     let send_result = backend_for_place.send(command);
@@ -149,10 +156,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(()) => "Processing...".to_string(),
                         Err(error) => error,
                     };
-                    refresh_view(&window, &state, &message);
+                    refresh_geometry_view(&window, &state, &message);
                 }
                 Err(error) => {
-                    refresh_view(&window, &state, &format!("Placement failed: {}", error));
+                    refresh_geometry_view(&window, &state, &format!("Placement failed: {}", error));
                 }
             }
         }
@@ -166,7 +173,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .lock()
                 .expect("editor state lock should not be poisoned");
             state.clear_selection();
-            refresh_view(&window, &state, "Build mode disabled");
+            refresh_geometry_view(&window, &state, "Build mode disabled");
         }
     });
 
@@ -179,7 +186,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("editor state lock should not be poisoned");
             state.set_hover_cell(x, y);
             refresh_preview(&window, &state);
-            refresh_simulation_view(&window, &state);
+            refresh_tooltip_view(&window, &state);
         }
     });
 
@@ -205,7 +212,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) => "Processing...".to_string(),
                 Err(error) => error,
             };
-            refresh_view(&window, &state, &message);
+            refresh_geometry_view(&window, &state, &message);
         }
     });
 
@@ -222,7 +229,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) => "Processing...".to_string(),
                 Err(error) => error,
             };
-            refresh_view(&window, &state, &message);
+            refresh_geometry_view(&window, &state, &message);
         }
     });
 
@@ -239,7 +246,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) => "Processing undo...".to_string(),
                 Err(error) => error,
             };
-            refresh_view(&window, &state, &message);
+            refresh_geometry_view(&window, &state, &message);
         }
     });
 
@@ -256,7 +263,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) => "Processing redo...".to_string(),
                 Err(error) => error,
             };
-            refresh_view(&window, &state, &message);
+            refresh_geometry_view(&window, &state, &message);
         }
     });
 
@@ -406,6 +413,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let changed = state.set_buy_flour(enabled);
             let message = buy_setting_message("Flour", enabled, changed);
             refresh_view(&window, &state, message);
+        }
+    });
+
+    let weak_window = window.as_weak();
+    let state_for_population_economy = Arc::clone(&state);
+    window.on_set_population_economy_enabled(move |enabled| {
+        if let Some(window) = weak_window.upgrade() {
+            let mut state = state_for_population_economy
+                .lock()
+                .expect("editor state lock should not be poisoned");
+            state.set_population_economy_enabled(enabled);
+            refresh_view(
+                &window,
+                &state,
+                if enabled {
+                    "Population economy included"
+                } else {
+                    "Population economy excluded"
+                },
+            );
         }
     });
 
@@ -688,7 +715,10 @@ fn handle_open_result(
         }
     };
 
-    if let Err(error) = backend.send(BackendCommand::LoadProject { simulator }) {
+    if let Err(error) = backend.send(BackendCommand::LoadProject {
+        simulator: Box::new(simulator),
+        settings,
+    }) {
         window.set_status_text(format!("Open failed: {error}").into());
         return;
     }
@@ -699,8 +729,9 @@ fn handle_open_result(
             .expect("editor state lock should not be poisoned");
         state.set_simulation_settings(settings);
         state.set_population_economy_settings(population_economy_settings);
+        state.mark_simulation_results_stale();
         state.clear_selection();
-        refresh_view(window, &state, "Opening project...");
+        refresh_geometry_view(window, &state, "Opening project and recalculating...");
     }
 
     let file_name = display_file_name(&path);
@@ -752,9 +783,46 @@ fn refresh_view(window: &MainWindow, state: &EditorState, status: &str) {
     refresh_simulation_view(window, state);
 }
 
+fn refresh_geometry_view(window: &MainWindow, state: &EditorState, status: &str) {
+    window.set_status_text(status.into());
+    refresh_static_view(window, state);
+    refresh_preview(window, state);
+    window.set_simulation_results_stale(state.simulation_results_stale());
+    if state.simulation_results_stale() {
+        window.set_armoury_summary(
+            "Simulation results are out of date.\nPress Recalculate after finishing map changes."
+                .into(),
+        );
+        window.set_population_economy_summary(
+            "Simulation results are out of date.\nGeometry changed; economy was not recalculated."
+                .into(),
+        );
+        window.set_simulation_tooltip_visible(false);
+    }
+}
+
 fn refresh_static_view(window: &MainWindow, state: &EditorState) {
-    let map_size = state.map_size() as i32;
-    window.set_map_size(map_size);
+    let bounds = state.map_bounds();
+    let old_min_x = window.get_map_min_x();
+    let old_max_y = window.get_map_max_y();
+    let old_pan_x = window.get_canvas_pan_x();
+    let old_pan_y = window.get_canvas_pan_y();
+    window.set_map_min_x(bounds.min_x);
+    window.set_map_min_y(bounds.min_y);
+    window.set_map_max_x(bounds.max_x);
+    window.set_map_max_y(bounds.max_y);
+    window.set_map_width(bounds.width() as i32);
+    window.set_map_height(bounds.height() as i32);
+
+    let cell_px = 10.0 * window.get_zoom();
+    let added_left = old_min_x - bounds.min_x;
+    let added_top = bounds.max_y - old_max_y;
+    if added_left != 0 {
+        window.set_canvas_pan_x(old_pan_x - added_left as f32 * cell_px);
+    }
+    if added_top != 0 {
+        window.set_canvas_pan_y(old_pan_y - added_top as f32 * cell_px);
+    }
     window.set_selected_building(state.selected_id().unwrap_or_default().into());
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
@@ -778,10 +846,6 @@ fn refresh_static_view(window: &MainWindow, state: &EditorState) {
     let boundaries = visuals::build_building_boundaries(state.simulator());
     let boundary_model = VecModel::from(boundaries);
     window.set_building_boundaries(ModelRc::new(boundary_model));
-
-    let list_entries = visuals::build_building_list(state.simulator());
-    let list_model = VecModel::from(list_entries);
-    window.set_placed_buildings(ModelRc::new(list_model));
 
     let anchor_labels = visuals::build_anchor_labels(state.simulator());
     let anchor_model = VecModel::from(anchor_labels);
@@ -807,6 +871,7 @@ fn refresh_preview(window: &MainWindow, state: &EditorState) {
 }
 
 fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
+    window.set_simulation_results_stale(state.simulation_results_stale());
     window.set_optimize_fletcher_routing(state.optimized_fletcher_routing());
     window.set_game_speed(state.game_speed() as i32);
     window.set_fear_factor(state.fear_factor());
@@ -817,11 +882,28 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     window.set_eco_setup_cost(build_eco_setup_summary(state).into());
     window.set_workshop_count_summary(build_workshop_count_summary(state).into());
     window.set_bread_count_summary(build_bread_count_summary(state).into());
-    window.set_armoury_summary(build_armoury_summary(state).into());
     window.set_fletchers_weapon(weapon_id(state.fletchers_weapon()).into());
     window.set_poleturners_weapon(weapon_id(state.poleturners_weapon()).into());
     window.set_blacksmiths_weapon(weapon_id(state.blacksmiths_weapon()).into());
     window.set_simulation_tooltips_enabled(state.simulation_tooltips_enabled());
+
+    if state.simulation_results_stale() {
+        window.set_armoury_summary(
+            "Simulation results are out of date.\nPress Recalculate after finishing map changes."
+                .into(),
+        );
+        window.set_population_economy_summary(
+            "Simulation results are out of date.\nGeometry changed; economy was not recalculated."
+                .into(),
+        );
+        window.set_simulation_tooltip_visible(false);
+        window.set_simulation_cycles(ModelRc::new(VecModel::from(
+            Vec::<SimulationCycleItem>::new(),
+        )));
+        return;
+    }
+
+    window.set_armoury_summary(build_armoury_summary(state).into());
 
     let items = state
         .cycle_rows()
@@ -865,6 +947,16 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     let model = VecModel::from(items);
     window.set_simulation_cycles(ModelRc::new(model));
 
+    refresh_tooltip_view(window, state);
+    refresh_population_economy_view(window, state);
+}
+
+fn refresh_tooltip_view(window: &MainWindow, state: &EditorState) {
+    if state.simulation_results_stale() {
+        window.set_simulation_tooltip_visible(false);
+        return;
+    }
+
     let (title, subtitle, lines) = build_hover_simulation_info(state);
     let tooltip_visible = state.simulation_tooltips_enabled() && !title.is_empty();
     let tooltip_height = estimate_tooltip_height(&subtitle, &lines);
@@ -874,8 +966,9 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
     if tooltip_visible {
         if let Some((hover_x, hover_y)) = state.hover_cell() {
             let cell_px = (10.0 * window.get_zoom()).round() as i32;
-            let tooltip_x = hover_x * cell_px + (cell_px / 2) - 125;
-            let tooltip_y = (state.map_size() as i32 - hover_y - 1) * cell_px - tooltip_height - 12;
+            let bounds = state.map_bounds();
+            let tooltip_x = (hover_x - bounds.min_x) * cell_px + (cell_px / 2) - 125;
+            let tooltip_y = (bounds.max_y - hover_y - 1) * cell_px - tooltip_height - 12;
             window.set_simulation_tooltip_x(tooltip_x);
             window.set_simulation_tooltip_y(tooltip_y);
             window.set_simulation_tooltip_height(tooltip_height);
@@ -892,12 +985,12 @@ fn refresh_simulation_view(window: &MainWindow, state: &EditorState) {
             .collect::<Vec<_>>(),
     );
     window.set_simulation_info_lines(ModelRc::new(info_model));
-    refresh_population_economy_view(window, state);
 }
 
 fn refresh_population_economy_view(window: &MainWindow, state: &EditorState) {
     let report = build_population_economy_report(state);
     let settings = report.settings;
+    window.set_population_economy_enabled(settings.enabled);
     window.set_population_max(settings.max_population as i32);
     window.set_population_current(settings.population as i32);
     window.set_population_workers(report.total_workers as i32);
@@ -923,46 +1016,73 @@ fn refresh_population_economy_view(window: &MainWindow, state: &EditorState) {
     window.set_total_popularity(report.total_popularity);
     window.set_popularity_good(report.total_popularity >= 0);
     window.set_population_worker_summary(build_population_worker_summary(&report).into());
-    window.set_population_economy_summary(build_population_economy_summary(&report).into());
+    window.set_population_economy_summary(build_combined_economy_summary(state, &report).into());
+}
+
+fn build_combined_economy_summary(
+    state: &EditorState,
+    report: &simulator::PopulationEconomyReport,
+) -> String {
+    let mut sections = vec![
+        build_eco_setup_summary(state),
+        build_workshop_count_summary(state),
+        build_bread_count_summary(state),
+        build_armoury_summary(state),
+    ];
+
+    if report.settings.enabled {
+        sections.push(build_population_worker_summary(report));
+        sections.push(build_population_economy_summary(report));
+    } else {
+        sections.push(build_additional_resources_summary(report));
+        sections.push(
+            "Population economy is not counted. Population, food consumption, tax, and inns are excluded."
+                .to_string(),
+        );
+    }
+
+    sections.join("\n\n")
 }
 
 fn build_population_economy_report(state: &EditorState) -> simulator::PopulationEconomyReport {
     let bread = state
         .simulator()
         .calculate_bread_economy(state.simulation_settings());
+    let population_settings = state.population_economy_settings();
+    let iron_stockpile_available =
+        state.simulator().buildings().iter().any(|building| {
+            building.stockpile_resource == Some(simulator::StockpileResource::Iron)
+        });
+    let iron = calculate_layout_iron_economy(state);
     let workshop_gold_per_minute = state
         .cycle_rows()
         .iter()
         .filter_map(|row| {
             let total_ticks = row.total_ticks?;
-            Some(net_gold_per_minute(row, state, total_ticks))
+            let scale = if row.iron_per_cycle > 0 {
+                iron.workshop_output_scale
+            } else {
+                1.0
+            };
+            Some(net_gold_per_minute(row, state, total_ticks) * scale)
         })
         .sum::<f64>();
-    let workshop_iron_demand_per_minute = state
-        .cycle_rows()
-        .iter()
-        .filter_map(|row| {
-            let total_ticks = row.total_ticks?;
-            Some(
-                f64::from(row.iron_per_cycle) / total_ticks as f64
-                    * f64::from(state.game_speed())
-                    * 60.0,
-            )
-        })
-        .sum::<f64>();
+    let food_gold_per_minute = bread_economy_gold_per_minute(&bread);
 
     simulator::calculate_population_economy(
-        state.population_economy_settings(),
+        population_settings,
         simulator::PopulationEconomyContext {
             game_speed_ticks_per_second: state.game_speed(),
             fear_factor: state.fear_factor(),
             placed_workers: placed_economy_workers(state),
             food_produced_per_minute: bread.bread_per_minute,
             food_sell_gold_per_unit: BREAD_SELL_GOLD,
-            layout_gold_per_minute: workshop_gold_per_minute
-                + bread_economy_gold_per_minute(&bread),
-            workshop_iron_demand_per_minute,
+            layout_gold_per_minute: workshop_gold_per_minute + food_gold_per_minute,
+            workshop_gold_per_minute,
+            food_gold_per_minute,
+            workshop_iron_demand_per_minute: iron.required_per_minute,
             workshops_buy_iron: state.buy_iron(),
+            iron_stockpile_available,
         },
     )
 }
@@ -1009,9 +1129,47 @@ fn build_population_worker_summary(report: &simulator::PopulationEconomyReport) 
     )
 }
 
-fn build_population_economy_summary(report: &simulator::PopulationEconomyReport) -> String {
+fn build_additional_resources_summary(report: &simulator::PopulationEconomyReport) -> String {
+    let iron = if report.iron_stockpile_available {
+        format!(
+            "Iron produced: {:.2} / min\nWorkshop iron demand: {:.2} / min\nIron used by workshops: {:.2} / min\nIron bought (deficit): {:.2} / min\nIron surplus: {:.2} / min",
+            report.iron_per_minute,
+            report.workshop_iron_demand_per_minute,
+            report.iron_used_per_minute,
+            report.iron_bought_per_minute,
+            report.iron_surplus_per_minute,
+        )
+    } else {
+        "Iron mines inactive: designate an Iron Stock on the map".to_string()
+    };
+
     format!(
-        "Popularity\nTax: {:+}\nFood: {:+}\nInns: {:+} ({:.1}% coverage)\nFear factor: {:+}\n\nFood\nRequired: {:.2} / min\nBread available: {:.2} / min\nBread consumed: {:.2} / min\nBread left to sell: {:.2} / min\nBalance: {:+.2} / min\n\nProduction\nStone: {:.2} / min\nIron: {:.2} / min\n\nGold\nLayout tab result: {:.2} / min\nConsumed bread not sold: -{:.2} / min\nLayout after food: {:.2} / min\nTax: {:+.2} / min\nIron mine benefit: {:.2} / min\nInn beer: -{:.2} / min\nTotal: {:.2} / min\n\nAdditional setup: {} wood + {} gold",
+        "Additional resources\nStone produced: {:.2} / min\nStone sell gold: {:.2} / min\n{}\nIron value: {:.2} gold / min\nResource workers: {}\nResource setup: {} wood",
+        report.stone_per_minute,
+        report.stone_gold_per_minute,
+        iron,
+        report.iron_gold_benefit_per_minute,
+        report.additional_workers,
+        report.additional_build_wood,
+    )
+}
+
+fn build_population_economy_summary(report: &simulator::PopulationEconomyReport) -> String {
+    let iron_note = if report.iron_stockpile_available {
+        format!(
+            "Iron produced: {:.2} / min\nWorkshop iron demand: {:.2} / min\nIron used by workshops: {:.2} / min\nIron bought (deficit): {:.2} / min\nIron surplus: {:.2} / min",
+            report.iron_per_minute,
+            report.workshop_iron_demand_per_minute,
+            report.iron_used_per_minute,
+            report.iron_bought_per_minute,
+            report.iron_surplus_per_minute,
+        )
+    } else {
+        "Iron mines inactive: designate an Iron Stock on the map".to_string()
+    };
+
+    format!(
+        "Popularity\nTax: {:+}\nFood: {:+}\nInns: {:+} ({:.1}% coverage)\nFear factor: {:+}\n\nFood\nRequired: {:.2} / min\nBread available: {:.2} / min\nBread consumed: {:.2} / min\nBread left to sell: {:.2} / min\nBalance: {:+.2} / min\n\nProduction\nStone: {:.2} / min\n{}\n\nGold per minute\nWorkshop: {:+.2}\nFood eaten: -{:.2}\nFood sell: {:+.2}\nInn beer: -{:.2}\nTax: {:+.2}\nStone: {:+.2}\nIron: {:+.2}\nTotal: {:+.2}\n\nAdditional setup: {} wood + {} gold",
         report.tax.popularity,
         report.food_ratio.popularity,
         report.inn_popularity,
@@ -1023,13 +1181,14 @@ fn build_population_economy_summary(report: &simulator::PopulationEconomyReport)
         report.food_sellable_per_minute,
         report.food_balance_per_minute,
         report.stone_per_minute,
-        report.iron_per_minute,
-        report.layout_gold_per_minute,
+        iron_note,
+        report.workshop_gold_per_minute,
         report.food_sale_reduction_per_minute,
-        report.layout_gold_after_food_per_minute,
-        report.tax_gold_per_minute,
-        report.iron_gold_benefit_per_minute,
+        report.food_gold_per_minute,
         report.inn_gold_per_minute,
+        report.tax_gold_per_minute,
+        report.stone_gold_per_minute,
+        report.iron_gold_benefit_per_minute,
         report.total_gold_per_minute,
         report.additional_build_wood,
         report.additional_build_gold
@@ -1049,25 +1208,83 @@ fn weapon_id(weapon: WeaponType) -> &'static str {
 }
 
 fn build_eco_setup_summary(state: &EditorState) -> String {
-    let mut gold = 0_u32;
-    let mut wood = 0_u32;
+    let costs = eco_setup_costs_for_types(
+        state
+            .simulator()
+            .buildings()
+            .iter()
+            .map(|building| building.building_type),
+    );
 
-    for building in state.simulator().buildings() {
-        let cost = building.building_type.build_cost();
-        gold += cost.gold;
-        wood += cost.wood;
+    format!(
+        "Eco setup cost: {} gold ({})\nWorkshop eco: {} gold ({})\nFood eco: {} gold ({})",
+        costs.total_gold_with_bought_wood(),
+        format_build_cost(costs.total_gold, costs.total_wood),
+        costs.workshop_gold_with_bought_wood(),
+        format_build_cost(costs.workshop_gold, costs.workshop_wood),
+        costs.food_gold_with_bought_wood(),
+        format_build_cost(costs.food_gold, costs.food_wood),
+    )
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EcoSetupCosts {
+    workshop_gold: u32,
+    workshop_wood: u32,
+    food_gold: u32,
+    food_wood: u32,
+    total_gold: u32,
+    total_wood: u32,
+}
+
+impl EcoSetupCosts {
+    fn workshop_gold_with_bought_wood(&self) -> u32 {
+        self.workshop_gold + self.workshop_wood * WOOD_BUY_GOLD
     }
 
-    if state.buy_wood() {
-        let bought_wood_gold = wood * WOOD_BUY_GOLD;
-        return format!(
-            "Eco setup cost: {} gold ({} build wood bought)",
-            gold + bought_wood_gold,
-            wood
-        );
+    fn food_gold_with_bought_wood(&self) -> u32 {
+        self.food_gold + self.food_wood * WOOD_BUY_GOLD
     }
 
-    format!("Eco setup needs: {} gold + {} wood", gold, wood)
+    fn total_gold_with_bought_wood(&self) -> u32 {
+        self.total_gold + self.total_wood * WOOD_BUY_GOLD
+    }
+}
+
+fn eco_setup_costs_for_types(
+    building_types: impl IntoIterator<Item = BuildingType>,
+) -> EcoSetupCosts {
+    let mut costs = EcoSetupCosts::default();
+
+    for building_type in building_types {
+        let cost = building_type.build_cost();
+        costs.total_gold += cost.gold;
+        costs.total_wood += cost.wood;
+
+        if matches!(
+            building_type,
+            BuildingType::WheatFarm
+                | BuildingType::Windmill
+                | BuildingType::Bakery
+                | BuildingType::Granary
+        ) {
+            costs.food_gold += cost.gold;
+            costs.food_wood += cost.wood;
+        } else {
+            costs.workshop_gold += cost.gold;
+            costs.workshop_wood += cost.wood;
+        }
+    }
+
+    costs
+}
+
+fn format_build_cost(gold: u32, wood: u32) -> String {
+    match (gold, wood) {
+        (0, wood) => format!("{wood} wood"),
+        (gold, 0) => format!("{gold} gold"),
+        (gold, wood) => format!("{gold} gold + {wood} wood"),
+    }
 }
 
 fn build_workshop_count_summary(state: &EditorState) -> String {
@@ -1128,7 +1345,44 @@ fn build_armoury_summary(state: &EditorState) -> String {
         format!("Armoury production\n{}", sections.join("\n\n"))
     };
 
-    format!("{}\n\n{}", armoury_text, build_bread_summary(state))
+    format!(
+        "{}\n\n{}\n\n{}",
+        armoury_text,
+        build_iron_armoury_summary(state),
+        build_bread_summary(state)
+    )
+}
+
+fn build_iron_armoury_summary(state: &EditorState) -> String {
+    let iron = calculate_layout_iron_economy(state);
+    let workshop_gold_per_minute = state
+        .cycle_rows()
+        .iter()
+        .filter_map(|row| {
+            let total_ticks = row.total_ticks?;
+            Some(effective_workshop_gold_per_minute(
+                row,
+                state,
+                total_ticks,
+                iron,
+            ))
+        })
+        .sum::<f64>();
+    let total_with_surplus = workshop_gold_per_minute + iron.surplus_sale_gold_per_minute;
+
+    format!(
+        "Iron supply (buy 45 / sell 23)\nProduced: {:.2} / min\nRequired at full workshop output: {:.2} / min\nUsed by workshops: {:.2} / min\nBought deficit: {:.2} / min (-{:.2} gold)\nSold surplus: {:.2} / min (+{:.2} gold)\nIron workshop output: {:.1}%\nWorkshop gold after iron: {:.2} / min\nWorkshop + iron surplus: {:.2} / min",
+        iron.produced_per_minute,
+        iron.required_per_minute,
+        iron.used_per_minute,
+        iron.bought_per_minute,
+        iron.bought_per_minute * f64::from(simulator::IRON_BUY_GOLD),
+        iron.surplus_per_minute,
+        iron.surplus_sale_gold_per_minute,
+        iron.workshop_output_scale * 100.0,
+        workshop_gold_per_minute,
+        total_with_surplus,
+    )
 }
 
 fn build_bread_summary(state: &EditorState) -> String {
@@ -1210,6 +1464,75 @@ fn net_gold_per_minute(
     total_ticks: u64,
 ) -> f64 {
     net_gold_per_cycle(row, state) / total_ticks as f64 * state.game_speed() as f64 * 60.0
+}
+
+fn calculate_layout_iron_economy(state: &EditorState) -> simulator::IronEconomy {
+    let iron_stockpile_available =
+        state.simulator().buildings().iter().any(|building| {
+            building.stockpile_resource == Some(simulator::StockpileResource::Iron)
+        });
+    let produced_per_minute = if iron_stockpile_available {
+        let fear_multiplier = 1.0 + f64::from(state.fear_factor().unsigned_abs()) / 5.0 * 0.33;
+        f64::from(state.population_economy_settings().iron_mine_count)
+            * simulator::IRON_PER_MINUTE
+            * fear_multiplier
+    } else {
+        0.0
+    };
+    let required_per_minute = state
+        .cycle_rows()
+        .iter()
+        .filter_map(|row| {
+            let total_ticks = row.total_ticks?;
+            Some(iron_required_per_minute(row, state, total_ticks))
+        })
+        .sum();
+
+    simulator::calculate_iron_economy(produced_per_minute, required_per_minute, state.buy_iron())
+}
+
+fn iron_required_per_minute(
+    row: &crate::backend::CycleSimulationRow,
+    state: &EditorState,
+    total_ticks: u64,
+) -> f64 {
+    f64::from(row.iron_per_cycle) / total_ticks as f64 * f64::from(state.game_speed()) * 60.0
+}
+
+fn effective_workshop_output_scale(
+    row: &crate::backend::CycleSimulationRow,
+    iron: simulator::IronEconomy,
+) -> f64 {
+    if row.iron_per_cycle == 0 {
+        1.0
+    } else {
+        iron.workshop_output_scale
+    }
+}
+
+fn effective_workshop_gold_per_minute(
+    row: &crate::backend::CycleSimulationRow,
+    state: &EditorState,
+    total_ticks: u64,
+    iron: simulator::IronEconomy,
+) -> f64 {
+    let base_gold = net_gold_per_minute(row, state, total_ticks);
+    if row.iron_per_cycle == 0 {
+        return base_gold;
+    }
+
+    if state.buy_iron() {
+        let produced_coverage = if iron.required_per_minute == 0.0 {
+            0.0
+        } else {
+            iron.used_per_minute / iron.required_per_minute
+        };
+        let supplied_per_minute =
+            iron_required_per_minute(row, state, total_ticks) * produced_coverage;
+        base_gold + supplied_per_minute * f64::from(simulator::IRON_BUY_GOLD)
+    } else {
+        base_gold * iron.workshop_output_scale
+    }
 }
 
 fn build_hover_simulation_info(state: &EditorState) -> (String, String, Vec<String>) {
@@ -1326,6 +1649,7 @@ fn build_workshop_hover_info(
     };
 
     let mut lines = Vec::new();
+    let iron = calculate_layout_iron_economy(state);
     let subtitle = format!("Current product: {}", row.weapon_type.display_name());
 
     match (row.total_ticks, row.armoury_id) {
@@ -1347,7 +1671,9 @@ fn build_workshop_hover_info(
                 "Average output / cycle: {:.2}",
                 row.average_weapons_per_cycle
             ));
-            let weapons_per_tick = row.average_weapons_per_cycle / total_ticks as f64;
+            let output_scale = effective_workshop_output_scale(row, iron);
+            let weapons_per_tick =
+                row.average_weapons_per_cycle / total_ticks as f64 * output_scale;
             lines.push(format!(
                 "Output / tick: {}",
                 format_rate_tick(weapons_per_tick)
@@ -1358,8 +1684,16 @@ fn build_workshop_hover_info(
             ));
             lines.push(format!(
                 "Net gold / min: {}",
-                format_rate_minute(net_gold_per_minute(row, state, total_ticks))
+                format_rate_minute(effective_workshop_gold_per_minute(
+                    row,
+                    state,
+                    total_ticks,
+                    iron,
+                ))
             ));
+            if row.iron_per_cycle > 0 {
+                lines.push(format!("Iron supply: {:.1}%", output_scale * 100.0));
+            }
         }
         _ => {
             lines.push(
@@ -1453,6 +1787,7 @@ fn build_stockpile_hover_info(
 fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, String, Vec<String>) {
     let mut weapon_totals = std::collections::BTreeMap::new();
     let mut total_gold_per_minute = 0.0;
+    let iron = calculate_layout_iron_economy(state);
 
     for row in state
         .cycle_rows()
@@ -1463,8 +1798,9 @@ fn build_armoury_hover_info(state: &EditorState, armoury_id: u32) -> (String, St
             continue;
         };
 
-        let per_tick = row.average_weapons_per_cycle / total_ticks as f64;
-        let gold_per_minute = net_gold_per_minute(row, state, total_ticks);
+        let output_scale = effective_workshop_output_scale(row, iron);
+        let per_tick = row.average_weapons_per_cycle / total_ticks as f64 * output_scale;
+        let gold_per_minute = effective_workshop_gold_per_minute(row, state, total_ticks, iron);
         total_gold_per_minute += gold_per_minute;
         let key = row.weapon_type.display_name().to_string();
         let totals = weapon_totals.entry(key).or_insert((0.0, 0.0));
@@ -1518,4 +1854,121 @@ fn format_rate_minute(value: f64) -> String {
 fn estimate_tooltip_height(subtitle: &str, lines: &[String]) -> i32 {
     let visible_line_count = 1 + i32::from(!subtitle.is_empty()) + lines.len() as i32;
     18 + (visible_line_count * 18)
+}
+
+#[cfg(test)]
+mod tests {
+    use simulator::{BuildingType, Simulator, StockpileResource, WeaponType};
+
+    use crate::{backend::CycleSimulationRow, editor_state::EditorState};
+
+    use super::build_population_economy_summary;
+    use super::{
+        calculate_layout_iron_economy, eco_setup_costs_for_types,
+        effective_workshop_gold_per_minute, format_build_cost,
+    };
+
+    #[test]
+    fn eco_setup_cost_splits_workshop_and_food_and_always_prices_build_wood() {
+        let building_types = std::iter::repeat_n(BuildingType::FletchersWorkshop, 12)
+            .chain(std::iter::repeat_n(BuildingType::PoleturnersWorkshop, 17))
+            .chain(std::iter::once(BuildingType::Armoury))
+            .chain(std::iter::repeat_n(BuildingType::WheatFarm, 3))
+            .chain(std::iter::repeat_n(BuildingType::Windmill, 3))
+            .chain(std::iter::repeat_n(BuildingType::Bakery, 22))
+            .chain(std::iter::once(BuildingType::Granary));
+        let costs = eco_setup_costs_for_types(building_types);
+
+        assert_eq!(costs.workshop_gold, 2_900);
+        assert_eq!(costs.workshop_wood, 415);
+        assert_eq!(costs.food_gold, 0);
+        assert_eq!(costs.food_wood, 330);
+        assert_eq!(costs.workshop_gold_with_bought_wood(), 4_560);
+        assert_eq!(costs.food_gold_with_bought_wood(), 1_320);
+        assert_eq!(costs.total_gold_with_bought_wood(), 5_880);
+        assert_eq!(format_build_cost(2_900, 415), "2900 gold + 415 wood");
+        assert_eq!(format_build_cost(0, 330), "330 wood");
+    }
+
+    fn iron_workshop_state(buy_iron: bool) -> (EditorState, CycleSimulationRow) {
+        let mut simulator = Simulator::new(40).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::GoodsYard, 10, 10)
+            .expect("goods yard should be placed");
+        simulator
+            .set_stockpile_resource_at(10, 10, StockpileResource::Iron)
+            .expect("iron stock should be assigned");
+
+        let row = CycleSimulationRow {
+            workshop_id: 1,
+            workshop_name: "Blacksmith".to_string(),
+            weapon_type: WeaponType::Sword,
+            armoury_id: Some(2),
+            total_ticks: Some(1_000),
+            travel_ticks: Some(0),
+            make_ticks: Some(1_000),
+            average_weapons_per_cycle: 1.0,
+            wood_per_cycle: 0,
+            iron_per_cycle: 1,
+            error: None,
+        };
+
+        let mut state = EditorState::new().expect("editor state should be created");
+        state.set_simulator(simulator);
+        state.set_iron_mine_count(1);
+        state.set_buy_iron(buy_iron);
+        state.set_cycle_rows(vec![row.clone()]);
+        (state, row)
+    }
+
+    #[test]
+    fn armoury_output_is_capped_by_produced_iron_when_buying_is_disabled() {
+        let (state, row) = iron_workshop_state(false);
+        let iron = calculate_layout_iron_economy(&state);
+        let gold = effective_workshop_gold_per_minute(&row, &state, 1_000, iron);
+
+        assert!((iron.produced_per_minute - 2.63).abs() < 0.000_001);
+        assert!((iron.required_per_minute - 3.0).abs() < 0.000_001);
+        assert!((iron.workshop_output_scale - 2.63 / 3.0).abs() < 0.000_001);
+        assert!((gold - 78.9).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn armoury_buys_only_the_iron_deficit_when_buying_is_enabled() {
+        let (state, row) = iron_workshop_state(true);
+        let iron = calculate_layout_iron_economy(&state);
+        let gold = effective_workshop_gold_per_minute(&row, &state, 1_000, iron);
+
+        assert!((iron.bought_per_minute - 0.37).abs() < 0.000_001);
+        assert_eq!(iron.workshop_output_scale, 1.0);
+        assert!((gold - 73.35).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn population_gold_summary_is_an_additive_ledger() {
+        let report = simulator::calculate_population_economy(
+            simulator::PopulationEconomySettings {
+                enabled: true,
+                population: 10,
+                inn_count: 1,
+                ..simulator::PopulationEconomySettings::default()
+            },
+            simulator::PopulationEconomyContext {
+                food_produced_per_minute: 20.0,
+                food_sell_gold_per_unit: 4.0,
+                layout_gold_per_minute: 300.0,
+                workshop_gold_per_minute: 200.0,
+                food_gold_per_minute: 100.0,
+                ..simulator::PopulationEconomyContext::default()
+            },
+        );
+        let summary = build_population_economy_summary(&report);
+
+        assert!(summary.contains("Workshop: +200.00"));
+        assert!(summary.contains("Food eaten: -24.00"));
+        assert!(summary.contains("Food sell: +100.00"));
+        assert!(summary.contains("Inn beer: -11.20"));
+        assert!(summary.contains("Stone: +0.00"));
+        assert!(summary.contains("Total: +264.80"));
+    }
 }

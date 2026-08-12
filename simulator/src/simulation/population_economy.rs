@@ -7,6 +7,7 @@ pub const FOOD_PER_PERSON_PER_MINUTE: f64 = 0.6;
 pub const INN_CAPACITY: u32 = 30;
 pub const INN_GOLD_PER_MINUTE: f64 = 11.2;
 pub const STONE_PER_MINUTE: f64 = 18.6;
+pub const STONE_SELL_GOLD: f64 = 7.0;
 pub const IRON_PER_MINUTE: f64 = 2.63;
 pub const IRON_SELL_GOLD: f64 = 23.0;
 pub const STONE_WORKERS: u32 = 4;
@@ -23,6 +24,7 @@ const MAX_CALCULATOR_COUNT: u32 = 10_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PopulationEconomySettings {
+    pub enabled: bool,
     pub max_population: u32,
     pub population: u32,
     pub inn_count: u32,
@@ -35,6 +37,7 @@ pub struct PopulationEconomySettings {
 impl Default for PopulationEconomySettings {
     fn default() -> Self {
         Self {
+            enabled: false,
             max_population: DEFAULT_MAX_POPULATION,
             population: 0,
             inn_count: 0,
@@ -88,8 +91,11 @@ pub struct PopulationEconomyContext {
     pub food_produced_per_minute: f64,
     pub food_sell_gold_per_unit: f64,
     pub layout_gold_per_minute: f64,
+    pub workshop_gold_per_minute: f64,
+    pub food_gold_per_minute: f64,
     pub workshop_iron_demand_per_minute: f64,
     pub workshops_buy_iron: bool,
+    pub iron_stockpile_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,16 +116,80 @@ pub struct PopulationEconomyReport {
     pub fear_popularity: i32,
     pub total_popularity: i32,
     pub stone_per_minute: f64,
+    pub stone_gold_per_minute: f64,
     pub iron_per_minute: f64,
+    pub iron_used_per_minute: f64,
+    pub iron_bought_per_minute: f64,
+    pub iron_surplus_per_minute: f64,
+    pub iron_stockpile_available: bool,
+    pub workshop_iron_demand_per_minute: f64,
     pub iron_gold_benefit_per_minute: f64,
     pub placed_workers: u32,
     pub additional_workers: u32,
     pub total_workers: u32,
     pub layout_gold_per_minute: f64,
+    pub workshop_gold_per_minute: f64,
+    pub food_gold_per_minute: f64,
     pub layout_gold_after_food_per_minute: f64,
     pub total_gold_per_minute: f64,
     pub additional_build_wood: u32,
     pub additional_build_gold: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IronEconomy {
+    pub produced_per_minute: f64,
+    pub required_per_minute: f64,
+    pub used_per_minute: f64,
+    pub bought_per_minute: f64,
+    pub surplus_per_minute: f64,
+    pub workshop_output_scale: f64,
+    pub purchase_savings_gold_per_minute: f64,
+    pub surplus_sale_gold_per_minute: f64,
+}
+
+impl IronEconomy {
+    pub fn total_gold_benefit_per_minute(self) -> f64 {
+        self.purchase_savings_gold_per_minute + self.surplus_sale_gold_per_minute
+    }
+}
+
+pub fn calculate_iron_economy(
+    produced_per_minute: f64,
+    required_per_minute: f64,
+    buy_iron: bool,
+) -> IronEconomy {
+    let produced_per_minute = produced_per_minute.max(0.0);
+    let required_per_minute = required_per_minute.max(0.0);
+    let used_per_minute = produced_per_minute.min(required_per_minute);
+    let bought_per_minute = if buy_iron {
+        (required_per_minute - used_per_minute).max(0.0)
+    } else {
+        0.0
+    };
+    let surplus_per_minute = (produced_per_minute - required_per_minute).max(0.0);
+    let workshop_output_scale = if buy_iron || required_per_minute == 0.0 {
+        1.0
+    } else {
+        used_per_minute / required_per_minute
+    };
+    let purchase_savings_gold_per_minute = if buy_iron {
+        used_per_minute * f64::from(IRON_BUY_GOLD)
+    } else {
+        0.0
+    };
+    let surplus_sale_gold_per_minute = surplus_per_minute * IRON_SELL_GOLD;
+
+    IronEconomy {
+        produced_per_minute,
+        required_per_minute,
+        used_per_minute,
+        bought_per_minute,
+        surplus_per_minute,
+        workshop_output_scale,
+        purchase_savings_gold_per_minute,
+        surplus_sale_gold_per_minute,
+    }
 }
 
 pub const TAX_LEVELS: [TaxLevel; 12] = [
@@ -210,9 +280,16 @@ pub fn calculate_population_economy(
     let food_ratio = settings.food_ratio();
     let ticks_per_minute = f64::from(context.game_speed_ticks_per_second) * 60.0;
     let months_per_minute = ticks_per_minute / f64::from(GAME_MONTH_TICKS);
-    let tax_gold_per_minute = f64::from(settings.population) * tax.coefficient * months_per_minute;
-    let food_required_per_minute =
-        f64::from(settings.population) * FOOD_PER_PERSON_PER_MINUTE * food_ratio.multiplier;
+    let tax_gold_per_minute = if settings.enabled {
+        f64::from(settings.population) * tax.coefficient * months_per_minute
+    } else {
+        0.0
+    };
+    let food_required_per_minute = if settings.enabled {
+        f64::from(settings.population) * FOOD_PER_PERSON_PER_MINUTE * food_ratio.multiplier
+    } else {
+        0.0
+    };
     let food_balance_per_minute = context.food_produced_per_minute - food_required_per_minute;
     let food_consumed_per_minute = context
         .food_produced_per_minute
@@ -223,41 +300,62 @@ pub fn calculate_population_economy(
     let layout_gold_after_food_per_minute =
         context.layout_gold_per_minute - food_sale_reduction_per_minute;
     let inn_capacity = settings.inn_count.saturating_mul(INN_CAPACITY);
-    let inn_coverage = if settings.population == 0 {
+    let inn_coverage = if !settings.enabled || settings.population == 0 {
         0.0
     } else {
         (f64::from(inn_capacity) / f64::from(settings.population)).min(1.0)
     };
-    let inn_popularity = inn_popularity(inn_coverage);
-    let inn_gold_per_minute = f64::from(settings.inn_count) * INN_GOLD_PER_MINUTE;
-    let fear_popularity = clamped_fear_factor(context.fear_factor);
-    let total_popularity =
-        tax.popularity + food_ratio.popularity + inn_popularity + fear_popularity;
-    let production_multiplier = 1.0 + f64::from(fear_popularity.unsigned_abs()) / 5.0 * 0.33;
-    let stone_per_minute =
-        f64::from(settings.stone_quarry_count) * STONE_PER_MINUTE * production_multiplier;
-    let iron_per_minute =
-        f64::from(settings.iron_mine_count) * IRON_PER_MINUTE * production_multiplier;
-    let iron_used = iron_per_minute.min(context.workshop_iron_demand_per_minute);
-    let iron_purchase_savings = if context.workshops_buy_iron {
-        iron_used * f64::from(IRON_BUY_GOLD)
+    let inn_popularity = if settings.enabled {
+        inn_popularity(inn_coverage)
+    } else {
+        0
+    };
+    let inn_gold_per_minute = if settings.enabled {
+        f64::from(settings.inn_count) * INN_GOLD_PER_MINUTE
     } else {
         0.0
     };
-    let excess_iron = (iron_per_minute - context.workshop_iron_demand_per_minute).max(0.0);
-    let iron_gold_benefit_per_minute = iron_purchase_savings + excess_iron * IRON_SELL_GOLD;
-    let additional_workers = settings
-        .inn_count
-        .saturating_mul(INN_WORKERS)
+    let fear_popularity = clamped_fear_factor(context.fear_factor);
+    let total_popularity = if settings.enabled {
+        tax.popularity + food_ratio.popularity + inn_popularity + fear_popularity
+    } else {
+        0
+    };
+    let production_multiplier = 1.0 + f64::from(fear_popularity.unsigned_abs()) / 5.0 * 0.33;
+    let stone_per_minute =
+        f64::from(settings.stone_quarry_count) * STONE_PER_MINUTE * production_multiplier;
+    let stone_gold_per_minute = stone_per_minute * STONE_SELL_GOLD;
+    let iron_per_minute = if context.iron_stockpile_available {
+        f64::from(settings.iron_mine_count) * IRON_PER_MINUTE * production_multiplier
+    } else {
+        0.0
+    };
+    let iron = calculate_iron_economy(
+        iron_per_minute,
+        context.workshop_iron_demand_per_minute,
+        context.workshops_buy_iron,
+    );
+    let iron_gold_benefit_per_minute = iron.total_gold_benefit_per_minute();
+    let inn_workers = if settings.enabled {
+        settings.inn_count.saturating_mul(INN_WORKERS)
+    } else {
+        0
+    };
+    let additional_workers = inn_workers
         .saturating_add(settings.stone_quarry_count.saturating_mul(STONE_WORKERS))
         .saturating_add(settings.iron_mine_count.saturating_mul(IRON_MINE_WORKERS));
     let total_workers = context.placed_workers.saturating_add(additional_workers);
-    let total_gold_per_minute =
-        layout_gold_after_food_per_minute + tax_gold_per_minute + iron_gold_benefit_per_minute
-            - inn_gold_per_minute;
-    let additional_build_wood = settings
-        .inn_count
-        .saturating_mul(INN_BUILD_WOOD)
+    let total_gold_per_minute = layout_gold_after_food_per_minute
+        + tax_gold_per_minute
+        + iron_gold_benefit_per_minute
+        + stone_gold_per_minute
+        - inn_gold_per_minute;
+    let inn_build_wood = if settings.enabled {
+        settings.inn_count.saturating_mul(INN_BUILD_WOOD)
+    } else {
+        0
+    };
+    let additional_build_wood = inn_build_wood
         .saturating_add(
             settings
                 .stone_quarry_count
@@ -268,7 +366,11 @@ pub fn calculate_population_economy(
                 .iron_mine_count
                 .saturating_mul(IRON_MINE_BUILD_WOOD),
         );
-    let additional_build_gold = settings.inn_count.saturating_mul(INN_BUILD_GOLD);
+    let additional_build_gold = if settings.enabled {
+        settings.inn_count.saturating_mul(INN_BUILD_GOLD)
+    } else {
+        0
+    };
 
     PopulationEconomyReport {
         settings,
@@ -287,12 +389,20 @@ pub fn calculate_population_economy(
         fear_popularity,
         total_popularity,
         stone_per_minute,
+        stone_gold_per_minute,
         iron_per_minute,
+        iron_used_per_minute: iron.used_per_minute,
+        iron_bought_per_minute: iron.bought_per_minute,
+        iron_surplus_per_minute: iron.surplus_per_minute,
+        iron_stockpile_available: context.iron_stockpile_available,
+        workshop_iron_demand_per_minute: context.workshop_iron_demand_per_minute,
         iron_gold_benefit_per_minute,
         placed_workers: context.placed_workers,
         additional_workers,
         total_workers,
         layout_gold_per_minute: context.layout_gold_per_minute,
+        workshop_gold_per_minute: context.workshop_gold_per_minute,
+        food_gold_per_minute: context.food_gold_per_minute,
         layout_gold_after_food_per_minute,
         total_gold_per_minute,
         additional_build_wood,
@@ -317,13 +427,37 @@ fn inn_popularity(coverage: f64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        PopulationEconomyContext, PopulationEconomySettings, calculate_population_economy,
+        IRON_BUY_GOLD, PopulationEconomyContext, PopulationEconomySettings, calculate_iron_economy,
+        calculate_population_economy,
     };
+
+    #[test]
+    fn iron_flow_caps_workshops_buys_only_deficit_and_sells_only_surplus() {
+        let produced_only = calculate_iron_economy(4.0, 10.0, false);
+        assert_eq!(produced_only.used_per_minute, 4.0);
+        assert_eq!(produced_only.bought_per_minute, 0.0);
+        assert_eq!(produced_only.workshop_output_scale, 0.4);
+
+        let with_buying = calculate_iron_economy(4.0, 10.0, true);
+        assert_eq!(with_buying.used_per_minute, 4.0);
+        assert_eq!(with_buying.bought_per_minute, 6.0);
+        assert_eq!(with_buying.workshop_output_scale, 1.0);
+        assert_eq!(
+            with_buying.purchase_savings_gold_per_minute,
+            4.0 * f64::from(IRON_BUY_GOLD)
+        );
+
+        let surplus = calculate_iron_economy(12.0, 10.0, false);
+        assert_eq!(surplus.used_per_minute, 10.0);
+        assert_eq!(surplus.surplus_per_minute, 2.0);
+        assert_eq!(surplus.surplus_sale_gold_per_minute, 46.0);
+    }
 
     #[test]
     fn tax_food_inn_and_fear_popularity_are_combined() {
         let report = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 population: 100,
                 inn_count: 4,
                 tax_index: 6,
@@ -351,6 +485,7 @@ mod tests {
     fn inn_popularity_uses_coverage_thresholds() {
         let report = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 population: 32,
                 inn_count: 1,
                 ..PopulationEconomySettings::default()
@@ -361,6 +496,7 @@ mod tests {
 
         let full = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 population: 32,
                 inn_count: 2,
                 ..PopulationEconomySettings::default()
@@ -374,6 +510,7 @@ mod tests {
     fn mines_scale_with_fear_and_add_workers() {
         let report = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 stone_quarry_count: 1,
                 iron_mine_count: 1,
                 ..PopulationEconomySettings::default()
@@ -381,20 +518,76 @@ mod tests {
             PopulationEconomyContext {
                 fear_factor: -5,
                 placed_workers: 10,
+                iron_stockpile_available: true,
                 ..PopulationEconomyContext::default()
             },
         );
 
         assert!((report.stone_per_minute - 18.6 * 1.33).abs() < f64::EPSILON);
+        assert!((report.stone_gold_per_minute - 18.6 * 1.33 * 7.0).abs() < f64::EPSILON);
         assert!((report.iron_per_minute - 2.63 * 1.33).abs() < f64::EPSILON);
         assert_eq!(report.additional_workers, 6);
         assert_eq!(report.total_workers, 16);
     }
 
     #[test]
+    fn iron_mines_are_independent_of_population_but_require_an_iron_stockpile() {
+        let settings = PopulationEconomySettings {
+            iron_mine_count: 2,
+            ..PopulationEconomySettings::default()
+        };
+        let stockpile = PopulationEconomyContext {
+            iron_stockpile_available: true,
+            ..PopulationEconomyContext::default()
+        };
+
+        let report = calculate_population_economy(settings, stockpile);
+        assert!((report.iron_per_minute - 5.26).abs() < f64::EPSILON);
+        assert_eq!(report.additional_workers, 4);
+        assert_eq!(report.additional_build_wood, 40);
+        assert_eq!(
+            calculate_population_economy(
+                PopulationEconomySettings {
+                    enabled: true,
+                    ..settings
+                },
+                PopulationEconomyContext::default(),
+            )
+            .iron_per_minute,
+            0.0,
+        );
+    }
+
+    #[test]
+    fn produced_iron_replaces_purchases_and_only_the_deficit_is_bought() {
+        let report = calculate_population_economy(
+            PopulationEconomySettings {
+                enabled: true,
+                iron_mine_count: 2,
+                ..PopulationEconomySettings::default()
+            },
+            PopulationEconomyContext {
+                workshop_iron_demand_per_minute: 10.0,
+                workshops_buy_iron: true,
+                iron_stockpile_available: true,
+                ..PopulationEconomyContext::default()
+            },
+        );
+
+        assert!((report.iron_per_minute - 5.26).abs() < f64::EPSILON);
+        assert!((report.iron_used_per_minute - 5.26).abs() < f64::EPSILON);
+        assert!((report.iron_bought_per_minute - 4.74).abs() < 0.000_001);
+        assert!(
+            (report.iron_gold_benefit_per_minute - 5.26 * f64::from(IRON_BUY_GOLD)).abs()
+                < 0.000_001
+        );
+    }
+
+    #[test]
     fn food_eaten_by_population_is_removed_from_sellable_layout_income() {
         let report = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 population: 100,
                 tax_index: 3,
                 food_ratio_index: 2,
@@ -421,6 +614,7 @@ mod tests {
     fn food_shortage_never_leaves_food_to_sell() {
         let report = calculate_population_economy(
             PopulationEconomySettings {
+                enabled: true,
                 population: 100,
                 food_ratio_index: 4,
                 ..PopulationEconomySettings::default()

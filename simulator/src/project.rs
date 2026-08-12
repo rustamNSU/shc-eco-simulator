@@ -3,16 +3,19 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BuildingPlacement, BuildingType, EntryPoint, Footprint, PopulationEconomySettings,
+    BuildingPlacement, BuildingType, EntryPoint, Footprint, MapBounds, PopulationEconomySettings,
     SimulationSettings, Simulator, SimulatorError, StockpileResource, WallSegment,
 };
 
-pub const PROJECT_FORMAT_VERSION: u32 = 1;
+pub const PROJECT_FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
-    pub map_size: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_size: Option<usize>,
+    #[serde(default)]
+    pub bounds: Option<MapBounds>,
     pub buildings: Vec<SavedBuilding>,
     pub walls: Vec<WallSegment>,
     pub simulation: SimulationSettings,
@@ -24,8 +27,8 @@ pub struct ProjectFile {
 pub struct SavedBuilding {
     pub id: u32,
     pub building_type: BuildingType,
-    pub x: usize,
-    pub y: usize,
+    pub x: i32,
+    pub y: i32,
     pub goods_yard_group_id: Option<u32>,
     pub stockpile_resource: Option<StockpileResource>,
     pub entry_point: Option<EntryPoint>,
@@ -39,7 +42,8 @@ impl ProjectFile {
     ) -> Self {
         Self {
             version: PROJECT_FORMAT_VERSION,
-            map_size: simulator.map_size(),
+            map_size: None,
+            bounds: Some(simulator.map_bounds()),
             buildings: simulator
                 .buildings()
                 .iter()
@@ -54,13 +58,27 @@ impl ProjectFile {
     pub fn into_simulator(
         self,
     ) -> Result<(Simulator, SimulationSettings, PopulationEconomySettings), SimulatorError> {
-        if self.version != PROJECT_FORMAT_VERSION {
+        if self.version != 1 && self.version != PROJECT_FORMAT_VERSION {
             return Err(SimulatorError::UnsupportedProjectVersion {
                 version: self.version,
             });
         }
 
-        let simulator = Simulator::from_saved_layout(self.map_size, self.buildings, self.walls)?;
+        let bounds = match self.version {
+            1 => MapBounds::square(self.map_size.ok_or(SimulatorError::InvalidProject(
+                "legacy project map size is missing",
+            ))?)
+            .ok_or(SimulatorError::InvalidMapSize)?,
+            PROJECT_FORMAT_VERSION => self.bounds.ok_or(SimulatorError::InvalidProject(
+                "project canvas bounds are missing",
+            ))?,
+            _ => {
+                return Err(SimulatorError::InvalidProject(
+                    "project version was not validated",
+                ));
+            }
+        };
+        let simulator = Simulator::from_saved_layout(bounds, self.buildings, self.walls)?;
         Ok((
             simulator,
             self.simulation,
@@ -124,7 +142,8 @@ pub(crate) fn validate_unique_ids(
 #[cfg(test)]
 mod tests {
     use crate::{
-        BuildingType, PopulationEconomySettings, SimulationSettings, Simulator, StockpileResource,
+        BuildingType, MapBounds, PopulationEconomySettings, SimulationSettings, Simulator,
+        StockpileResource, WeaponType,
     };
 
     use super::{ProjectFile, SavedBuilding};
@@ -146,15 +165,26 @@ mod tests {
             .expect("stockpile should be marked");
 
         let settings = SimulationSettings {
+            game_speed_ticks_per_second: 65,
+            fear_factor: -3,
             buy_wood: false,
+            buy_iron: false,
             buy_wheat: true,
+            buy_flour: true,
             optimized_fletcher_routing: true,
-            ..SimulationSettings::default()
+            fletchers_weapon: WeaponType::Crossbow,
+            poleturners_weapon: WeaponType::Pike,
+            blacksmiths_weapon: WeaponType::Mace,
         };
         let population_economy = PopulationEconomySettings {
+            enabled: true,
+            max_population: 900,
             population: 123,
             inn_count: 2,
-            ..PopulationEconomySettings::default()
+            stone_quarry_count: 4,
+            iron_mine_count: 7,
+            tax_index: 8,
+            food_ratio_index: 4,
         };
         let original = ProjectFile::capture(&simulator, settings, population_economy);
         let json = serde_json::to_string_pretty(&original).expect("project should serialize");
@@ -184,6 +214,76 @@ mod tests {
             .place_building(BuildingType::Armoury, 30, 30)
             .expect("new placement should work after loading");
         assert!(new_id > previous_max_id);
+    }
+
+    #[test]
+    fn json_round_trip_preserves_expanded_bounds_and_negative_geometry() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        let armoury_id = simulator
+            .place_building(BuildingType::Armoury, 0, 0)
+            .expect("edge placement should expand the canvas");
+        let bakery_id = simulator
+            .place_building(BuildingType::Bakery, -40, -20)
+            .expect("negative building should be placed");
+        simulator
+            .place_wall(-50, -20, -50, 10)
+            .expect("negative wall should expand the canvas again");
+
+        let project = ProjectFile::capture(
+            &simulator,
+            SimulationSettings::default(),
+            PopulationEconomySettings::default(),
+        );
+        let json = serde_json::to_value(&project).expect("project should serialize");
+        assert_eq!(json["bounds"]["min_x"], -100);
+        assert!(json.get("map_size").is_none());
+
+        let decoded: ProjectFile =
+            serde_json::from_value(json).expect("project should deserialize");
+        let (restored, _, _) = decoded.into_simulator().expect("project should restore");
+
+        assert_eq!(restored.map_bounds(), simulator.map_bounds());
+        assert_eq!(restored.walls(), simulator.walls());
+        assert_eq!(restored.buildings()[0].x, 0);
+        assert_eq!(restored.buildings()[0].y, 0);
+        assert!(
+            restored
+                .distance_between(armoury_id, bakery_id)
+                .expect("distance should be restored")
+                .distance_cells
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn version_one_json_uses_legacy_square_map_size() {
+        let simulator = Simulator::new(30).expect("simulator should be created");
+        let project = ProjectFile::capture(
+            &simulator,
+            SimulationSettings::default(),
+            PopulationEconomySettings::default(),
+        );
+        let mut json = serde_json::to_value(project).expect("project should serialize");
+        let object = json.as_object_mut().expect("project should be an object");
+        object.insert("version".to_string(), serde_json::json!(1));
+        object.insert("map_size".to_string(), serde_json::json!(30));
+        object.remove("bounds");
+
+        let decoded: ProjectFile =
+            serde_json::from_value(json).expect("legacy project should deserialize");
+        let (restored, _, _) = decoded
+            .into_simulator()
+            .expect("legacy project should restore");
+
+        assert_eq!(
+            restored.map_bounds(),
+            MapBounds {
+                min_x: 0,
+                min_y: 0,
+                max_x: 30,
+                max_y: 30,
+            }
+        );
     }
 
     #[test]

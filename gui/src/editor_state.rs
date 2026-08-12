@@ -28,6 +28,7 @@ pub struct EditorState {
     simulation_settings: SimulationSettings,
     population_economy_settings: PopulationEconomySettings,
     cycle_rows: Vec<CycleSimulationRow>,
+    simulation_results_stale: bool,
 }
 
 impl EditorState {
@@ -37,10 +38,11 @@ impl EditorState {
             selected: None,
             hover_cell: None,
             wall_start: None,
-            simulation_tooltips_enabled: false,
+            simulation_tooltips_enabled: true,
             simulation_settings: SimulationSettings::default(),
             population_economy_settings: PopulationEconomySettings::default(),
             cycle_rows: Vec::new(),
+            simulation_results_stale: true,
         })
     }
 
@@ -48,12 +50,26 @@ impl EditorState {
         self.simulator.map_size()
     }
 
+    pub fn map_bounds(&self) -> simulator::MapBounds {
+        self.simulator.map_bounds()
+    }
+
     pub fn set_simulator(&mut self, simulator: Simulator) {
         self.simulator = simulator;
     }
 
-    pub fn set_cycle_rows(&mut self, cycle_rows: Option<Vec<CycleSimulationRow>>) {
-        self.cycle_rows = cycle_rows.unwrap_or_default();
+    pub fn set_cycle_rows(&mut self, cycle_rows: Vec<CycleSimulationRow>) {
+        self.cycle_rows = cycle_rows;
+        self.simulation_results_stale = false;
+    }
+
+    pub fn mark_simulation_results_stale(&mut self) {
+        self.cycle_rows.clear();
+        self.simulation_results_stale = true;
+    }
+
+    pub fn simulation_results_stale(&self) -> bool {
+        self.simulation_results_stale
     }
 
     pub fn selected_id(&self) -> Option<&'static str> {
@@ -135,7 +151,7 @@ impl EditorState {
         let x = x.floor() as i32;
         let y = y.floor() as i32;
 
-        if x < 0 || y < 0 {
+        if !self.simulator.map_bounds().contains(x, y) {
             self.hover_cell = None;
             return;
         }
@@ -147,13 +163,7 @@ impl EditorState {
         let x = x.floor() as i32;
         let y = y.floor() as i32;
 
-        if x < 0 || y < 0 {
-            return Err("cell is outside map".to_string());
-        }
-
-        let ux = x as usize;
-        let uy = y as usize;
-        if ux >= self.map_size() || uy >= self.map_size() {
+        if !self.simulator.map_bounds().contains(x, y) {
             return Err("cell is outside map".to_string());
         }
 
@@ -161,28 +171,24 @@ impl EditorState {
             Some(SelectedTool::Building(building_type)) => Ok(PlacementOutcome::BackendCommand(
                 BackendCommand::PlaceBuilding {
                     building_type,
-                    x: ux,
-                    y: uy,
+                    x,
+                    y,
                 },
             )),
             Some(SelectedTool::Wall) => self.place_wall_click(x, y),
             Some(SelectedTool::Remove) => {
                 Ok(PlacementOutcome::BackendCommand(BackendCommand::RemoveAt {
-                    x: ux,
-                    y: uy,
+                    x,
+                    y,
                 }))
             }
-            Some(SelectedTool::SetWoodStock) => {
-                self.mark_stockpile(ux, uy, StockpileResource::Wood)
-            }
-            Some(SelectedTool::SetIronStock) => {
-                self.mark_stockpile(ux, uy, StockpileResource::Iron)
-            }
+            Some(SelectedTool::SetWoodStock) => self.mark_stockpile(x, y, StockpileResource::Wood),
+            Some(SelectedTool::SetIronStock) => self.mark_stockpile(x, y, StockpileResource::Iron),
             Some(SelectedTool::SetWheatStock) => {
-                self.mark_stockpile(ux, uy, StockpileResource::Wheat)
+                self.mark_stockpile(x, y, StockpileResource::Wheat)
             }
             Some(SelectedTool::SetFlourStock) => {
-                self.mark_stockpile(ux, uy, StockpileResource::Flour)
+                self.mark_stockpile(x, y, StockpileResource::Flour)
             }
             None => Err("no tool selected".to_string()),
         }
@@ -207,8 +213,8 @@ impl EditorState {
                 self.wall_start = None;
                 Ok(PlacementOutcome::BackendCommand(
                     BackendCommand::PlaceWall {
-                        start: (sx as usize, sy as usize),
-                        end: (x as usize, y as usize),
+                        start: (sx, sy),
+                        end: (x, y),
                     },
                 ))
             }
@@ -231,6 +237,14 @@ impl EditorState {
 
     pub fn population_economy_settings(&self) -> PopulationEconomySettings {
         self.population_economy_settings
+    }
+
+    pub fn set_population_economy_enabled(&mut self, enabled: bool) -> bool {
+        if self.population_economy_settings.enabled == enabled {
+            return false;
+        }
+        self.population_economy_settings.enabled = enabled;
+        true
     }
 
     pub fn set_population_economy_settings(&mut self, settings: PopulationEconomySettings) {
@@ -384,16 +398,11 @@ impl EditorState {
 
     pub fn hovered_building(&self) -> Option<&simulator::BuildingPlacement> {
         let (hover_x, hover_y) = self.hover_cell?;
-        if hover_x < 0 || hover_y < 0 {
-            return None;
-        }
-
-        let ux = hover_x as usize;
-        let uy = hover_y as usize;
-        self.simulator
-            .buildings()
-            .iter()
-            .find(|building| building.occupied_cells().any(|cell| cell == (ux, uy)))
+        self.simulator.buildings().iter().find(|building| {
+            building
+                .occupied_cells()
+                .any(|cell| cell == (hover_x, hover_y))
+        })
     }
 
     pub fn hover_cell(&self) -> Option<(i32, i32)> {
@@ -445,8 +454,8 @@ impl EditorState {
 
     fn mark_stockpile(
         &mut self,
-        x: usize,
-        y: usize,
+        x: i32,
+        y: i32,
         resource: StockpileResource,
     ) -> Result<PlacementOutcome, String> {
         self.wall_start = None;
@@ -462,14 +471,14 @@ impl EditorState {
 
         match self.selected {
             Some(SelectedTool::Building(selected)) => {
-                let map_size = self.simulator.map_size() as i32;
+                let bounds = self.simulator.map_bounds();
                 let footprint = Footprint::for_type(selected);
                 let mut cells = Vec::new();
 
                 for (dx, dy) in footprint.occupied_offsets() {
                     let x = anchor_x + dx as i32;
                     let y = anchor_y + dy as i32;
-                    if x >= 0 && y >= 0 && x < map_size && y < map_size {
+                    if bounds.contains(x, y) {
                         cells.push((x, y));
                     }
                 }
@@ -479,15 +488,7 @@ impl EditorState {
             Some(SelectedTool::Wall) => {
                 if let Some((sx, sy)) = self.wall_start {
                     if sx == anchor_x || sy == anchor_y {
-                        return line_cells(
-                            sx as usize,
-                            sy as usize,
-                            anchor_x as usize,
-                            anchor_y as usize,
-                        )
-                        .into_iter()
-                        .map(|(x, y)| (x as i32, y as i32))
-                        .collect();
+                        return line_cells(sx, sy, anchor_x, anchor_y);
                     }
                     return Vec::new();
                 }
@@ -500,5 +501,56 @@ impl EditorState {
             | Some(SelectedTool::SetFlourStock) => vec![(anchor_x, anchor_y)],
             None => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use simulator::{BuildingType, Simulator};
+
+    use crate::backend::BackendCommand;
+
+    use super::{EditorState, PlacementOutcome};
+
+    #[test]
+    fn negative_canvas_coordinates_reach_the_backend_unchanged() {
+        let mut simulator = Simulator::new(20).expect("simulator should be created");
+        simulator
+            .place_building(BuildingType::Armoury, 0, 0)
+            .expect("edge placement should create negative canvas space");
+        let mut state = EditorState::new().expect("editor state should be created");
+        state.set_simulator(simulator);
+        assert!(state.set_selected_from_id("bakery"));
+
+        state.set_hover_cell(-25.2, -10.1);
+        assert_eq!(state.hover_cell(), Some((-26, -11)));
+        let outcome = state
+            .place_selected(-25.2, -10.1)
+            .expect("negative coordinate should be accepted");
+
+        match outcome {
+            PlacementOutcome::BackendCommand(BackendCommand::PlaceBuilding {
+                building_type,
+                x,
+                y,
+            }) => {
+                assert_eq!(building_type, BuildingType::Bakery);
+                assert_eq!((x, y), (-26, -11));
+            }
+            _ => panic!("expected a building placement command"),
+        }
+    }
+
+    #[test]
+    fn geometry_changes_mark_simulation_results_stale_until_rows_are_replaced() {
+        let mut state = EditorState::new().expect("editor state should be created");
+        assert!(state.simulation_results_stale());
+
+        state.set_cycle_rows(Vec::new());
+        assert!(!state.simulation_results_stale());
+
+        state.mark_simulation_results_stale();
+        assert!(state.simulation_results_stale());
+        assert!(state.cycle_rows().is_empty());
     }
 }

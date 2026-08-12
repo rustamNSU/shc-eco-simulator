@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use simulator::{BuildingType, Simulator, StockpileResource};
 
-use crate::{BuildingBoundary, BuildingListItem, MapMarker, OccupiedCellVisual};
+use crate::{BuildingBoundary, MapMarker, OccupiedCellVisual};
 
 pub fn building_color(building_type: BuildingType) -> slint::Color {
     match building_type {
@@ -34,11 +34,7 @@ pub fn build_occupied_cells(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
             } else {
                 color
             };
-            cells.push(OccupiedCellVisual {
-                x: x as i32,
-                y: y as i32,
-                color,
-            });
+            cells.push(OccupiedCellVisual { x, y, color });
         }
     }
 
@@ -46,8 +42,8 @@ pub fn build_occupied_cells(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
     for wall in simulator.walls() {
         for (x, y) in wall.cells() {
             cells.push(OccupiedCellVisual {
-                x: x as i32,
-                y: y as i32,
+                x,
+                y,
                 color: wall_color,
             });
         }
@@ -101,8 +97,8 @@ pub fn build_building_boundaries(simulator: &Simulator) -> Vec<BuildingBoundary>
     edges
         .into_iter()
         .map(|edge| BuildingBoundary {
-            x: edge.x as i32,
-            y: edge.y as i32,
+            x: edge.x,
+            y: edge.y,
             horizontal: edge.horizontal,
         })
         .collect()
@@ -110,15 +106,15 @@ pub fn build_building_boundaries(simulator: &Simulator) -> Vec<BuildingBoundary>
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct BoundaryEdge {
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     horizontal: bool,
 }
 
 fn append_boundary_edges(
     edges: &mut BTreeSet<BoundaryEdge>,
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     width: usize,
     height: usize,
 ) {
@@ -128,13 +124,13 @@ fn append_boundary_edges(
 
     for dx in 0..width {
         edges.insert(BoundaryEdge {
-            x: x + dx,
+            x: x + dx as i32,
             y,
             horizontal: true,
         });
         edges.insert(BoundaryEdge {
-            x: x + dx,
-            y: y + height,
+            x: x + dx as i32,
+            y: y + height as i32,
             horizontal: true,
         });
     }
@@ -142,31 +138,15 @@ fn append_boundary_edges(
     for dy in 0..height {
         edges.insert(BoundaryEdge {
             x,
-            y: y + dy,
+            y: y + dy as i32,
             horizontal: false,
         });
         edges.insert(BoundaryEdge {
-            x: x + width,
-            y: y + dy,
+            x: x + width as i32,
+            y: y + dy as i32,
             horizontal: false,
         });
     }
-}
-
-pub fn build_building_list(simulator: &Simulator) -> Vec<BuildingListItem> {
-    let mut result = Vec::with_capacity(simulator.buildings().len());
-
-    for building in simulator.buildings() {
-        result.push(BuildingListItem {
-            id: building.id as i32,
-            name: building_list_name(building).into(),
-            x: building.x as i32,
-            y: building.y as i32,
-            color: building_color(building.building_type),
-        });
-    }
-
-    result
 }
 
 pub fn build_anchor_labels(simulator: &Simulator) -> Vec<MapMarker> {
@@ -174,8 +154,8 @@ pub fn build_anchor_labels(simulator: &Simulator) -> Vec<MapMarker> {
 
     for building in simulator.buildings() {
         result.push(MapMarker {
-            x: building.x as i32,
-            y: building.y as i32,
+            x: building.x,
+            y: building.y,
             text: building.id.to_string().into(),
             color: slint::Color::from_rgb_u8(20, 20, 20),
             bg: slint::Color::from_argb_u8(0, 0, 0, 0),
@@ -192,8 +172,8 @@ pub fn build_entry_labels(simulator: &Simulator) -> Vec<MapMarker> {
     for building in simulator.buildings() {
         if let Some(entry) = building.entry_point {
             result.push(MapMarker {
-                x: entry.x as i32,
-                y: entry.y as i32,
+                x: entry.x,
+                y: entry.y,
                 text: building.id.to_string().into(),
                 color: slint::Color::from_rgb_u8(0, 80, 0),
                 bg: light_green,
@@ -203,8 +183,8 @@ pub fn build_entry_labels(simulator: &Simulator) -> Vec<MapMarker> {
         for component in building.components() {
             if let Some(entry) = component.entry_point {
                 result.push(MapMarker {
-                    x: entry.x as i32,
-                    y: entry.y as i32,
+                    x: entry.x,
+                    y: entry.y,
                     text: building.id.to_string().into(),
                     color: slint::Color::from_rgb_u8(0, 80, 0),
                     bg: light_green,
@@ -225,8 +205,8 @@ pub fn build_stockpile_resource_labels(simulator: &Simulator) -> Vec<MapMarker> 
         };
 
         result.push(MapMarker {
-            x: (building.x + 1) as i32,
-            y: (building.y + 1) as i32,
+            x: building.x + 1,
+            y: building.y + 1,
             text: resource.short_label().into(),
             color: slint::Color::from_rgb_u8(20, 20, 20),
             bg: stockpile_resource_color(resource),
@@ -239,7 +219,7 @@ pub fn build_stockpile_resource_labels(simulator: &Simulator) -> Vec<MapMarker> 
 pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> {
     let mut result = Vec::new();
     let red = slint::Color::from_rgb_u8(220, 40, 40);
-    let map_size = simulator.map_size();
+    let bounds = simulator.map_bounds();
 
     for building in simulator.buildings() {
         if building.building_type != BuildingType::GoodsYard && building.entry_point.is_none() {
@@ -249,7 +229,7 @@ pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> 
                 building.y,
                 building.width(),
                 red,
-                map_size,
+                bounds,
             );
         }
 
@@ -261,26 +241,13 @@ pub fn build_no_entry_markers(simulator: &Simulator) -> Vec<OccupiedCellVisual> 
                     component.y,
                     component.size,
                     red,
-                    map_size,
+                    bounds,
                 );
             }
         }
     }
 
     result
-}
-
-fn building_list_name(building: &simulator::BuildingPlacement) -> String {
-    match building.stockpile_resource {
-        Some(resource) => {
-            format!(
-                "{} [{}]",
-                building.building_type.display_name(),
-                resource.display_name()
-            )
-        }
-        None => building.building_type.display_name().to_string(),
-    }
 }
 
 fn stockpile_resource_color(resource: StockpileResource) -> slint::Color {
@@ -294,32 +261,32 @@ fn stockpile_resource_color(resource: StockpileResource) -> slint::Color {
 
 fn append_diagonal_cells(
     out: &mut Vec<OccupiedCellVisual>,
-    x: usize,
-    y: usize,
+    x: i32,
+    y: i32,
     size: usize,
     color: slint::Color,
-    map_size: usize,
+    bounds: simulator::MapBounds,
 ) {
     if size == 0 {
         return;
     }
 
     for i in 0..size {
-        let p1 = (x + i, y + i);
-        let p2 = (x + i, y + (size - 1 - i));
+        let p1 = (x + i as i32, y + i as i32);
+        let p2 = (x + i as i32, y + (size - 1 - i) as i32);
 
-        if p1.0 < map_size && p1.1 < map_size {
+        if bounds.contains(p1.0, p1.1) {
             out.push(OccupiedCellVisual {
-                x: p1.0 as i32,
-                y: p1.1 as i32,
+                x: p1.0,
+                y: p1.1,
                 color,
             });
         }
 
-        if p2.0 < map_size && p2.1 < map_size && p2 != p1 {
+        if bounds.contains(p2.0, p2.1) && p2 != p1 {
             out.push(OccupiedCellVisual {
-                x: p2.0 as i32,
-                y: p2.1 as i32,
+                x: p2.0,
+                y: p2.1,
                 color,
             });
         }

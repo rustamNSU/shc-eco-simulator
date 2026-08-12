@@ -4,8 +4,8 @@ use super::{BuildingComponent, BuildingType, EntryPoint, Footprint, StockpileRes
 pub struct BuildingPlacement {
     pub id: u32,
     pub building_type: BuildingType,
-    pub x: usize,
-    pub y: usize,
+    pub x: i32,
+    pub y: i32,
     pub goods_yard_group_id: Option<u32>,
     pub stockpile_resource: Option<StockpileResource>,
     pub entry_point: Option<EntryPoint>,
@@ -14,16 +14,16 @@ pub struct BuildingPlacement {
 }
 
 impl BuildingPlacement {
-    pub fn occupied_cells(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    pub fn occupied_cells(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.footprint
             .occupied_offsets()
-            .map(move |(dx, dy)| (self.x + dx, self.y + dy))
+            .map(move |(dx, dy)| (self.x + dx as i32, self.y + dy as i32))
     }
 
-    pub fn blocking_cells(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    pub fn blocking_cells(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.footprint
             .blocking_offsets()
-            .map(move |(dx, dy)| (self.x + dx, self.y + dy))
+            .map(move |(dx, dy)| (self.x + dx as i32, self.y + dy as i32))
     }
 
     pub fn width(&self) -> usize {
